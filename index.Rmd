@@ -1,0 +1,423 @@
+---
+title: "Neighborhood Vulnerability Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+  orientation: columns
+# vertical_layout: fill
+# navbar:
+#  - {icon: "fa-github", href: "https://github.com/alturkaa/socio-cov", align: right }
+---
+
+```{r packages, include=FALSE}
+
+# ---- Import libraries ----
+library(tidycensus)
+library(tidyverse)
+library(mapview)
+library(sf)
+library(ggmap)
+library(janitor)
+library(tmap)
+tmap_mode('view')
+library(leaflet)
+library(crosstalk)
+library(plotly)
+library(DT)
+library(RColorBrewer)
+
+options(tigris_use_cache = TRUE)
+
+# creates searchable table of variables in 2018 5-year ACS
+var18 <- load_variables(2018, "acs5", cache = TRUE)
+
+# ---- Population/race data with geographies using tidycensus ----
+travis_tracts <- get_acs(geography = 'tract', output = 'wide', state = 'TX', county = 'Travis', table = 'B03002', geometry = TRUE)
+
+# create variables, create county FIPS var, and subset df
+travis_tracts <- travis_tracts %>%
+  rename(nonhisp = B03002_002E,
+         nhwhite = B03002_003E,
+         nhblack = B03002_004E,
+         hispanic = B03002_012E, 
+         total_pop = B03002_001E) %>% 
+  mutate(county_fips = substr(GEOID, 1,5)) %>%
+  select(GEOID, nonhisp, nhwhite, nhblack, hispanic, total_pop, county_fips) %>%
+  arrange(GEOID, county_fips)
+
+# create county race data from tracts data
+county_race_data <- travis_tracts %>%
+  group_by(county_fips) %>% # only 1 county!
+  summarize(county_pop = sum(total_pop), county_white = sum(nhwhite), county_black = sum(nhblack), county_hispanic = sum(hispanic)) %>% 
+  st_drop_geometry()
+
+# join county and tract data
+cty_tract <- left_join(x = travis_tracts, y = county_race_data, by = 'county_fips')
+
+# create segregation indices
+tract_dis <- cty_tract %>% 
+  mutate(diss_white_black = abs(nhwhite / county_white - nhblack / county_black),
+         diss_white_hispanic = abs(nhwhite / county_white - hispanic / county_hispanic))
+
+# ---- Variables to add from 2018 ACS ----
+# B09021_001 Total adults with living arrangements 18 years and over 
+# B09021_002 Lives alone
+# B21001_001 Total adults 18 and over
+# B21001_002 Veteran status 18 and over
+# B25041_001 Total housing units
+# B25041_002 No bedrooms
+# B25041_003 1 bedroom
+# B25014_008 Number Renter occupied
+# B25014_012 1.51-2 occupants per room
+# B25014_013 2.01 or more occupants per room
+# B25034_001 Total structures
+# B25034_002 Structures built 2014 and later
+# B25034_003 Built 2010-2013
+# B25034_004 Built 2000-2010
+# B25034_005 Built 1990-2000
+# B19019_001 Median household income
+
+# create list of variables to extract
+extra_vars <- c('B09021_001', 'B09021_002', 'B25014_008', 'B25014_012', 'B25014_013', 'B21001_001', 'B21001_002', 'B25041_001', 'B25041_002', 'B25041_003', 'B25034_001', 'B25034_002', 'B25034_003', 'B25034_004', 'B25034_005', 'B19019_001')
+
+# get those extra vars - without geographies
+extra_vars_df <- get_acs(geography = "tract", output = 'wide', state = 'TX', county = 'Travis', variables = extra_vars, geometry = TRUE)
+
+# Convert tract area to square mile for housing density measure
+extra_vars_df$mile2 <- st_area(extra_vars_df$geometry) / 2589988.1103
+
+# drop geometry of extra vars df to make merge below work
+extra_vars_df <- extra_vars_df %>% 
+  st_drop_geometry()
+
+# ---- Merge two Census dataframes ----
+# inner merge
+travis_census_merge <- left_join(tract_dis, extra_vars_df, by = 'GEOID')
+
+# create new variables
+travis_census_merge <- travis_census_merge %>% 
+  mutate(percent_living_alone = (B09021_002E / B09021_001E) * 100,
+         percent_veteran = (B21001_002E / B21001_001E) * 100,
+         percent_overcrowded_rentals = ((B25014_012E + B25014_013E) / B25014_008E) * 100,
+         units_per_sqmi = B25041_001E / mile2,
+         percent_studio_1bd = ((B25041_002E + B25041_003E) / B25041_001E) * 100,
+         percent_built_before_1990 = 100 - (((B25034_002E + B25034_003E + B25034_004E + B25034_005E) / B25034_001E) * 100),
+         percent_hispanic = (hispanic / total_pop) * 100,
+         percent_nhblack = (nhblack / total_pop) * 100,
+         percent_nhwhite = (nhwhite / total_pop) * 100,
+         median_income = B19019_001E)
+
+# subset df
+travis_census_condensed <- travis_census_merge %>% 
+  select(GEOID, county_fips, total_pop, contains(c('percent', 'units', 'median', 'diss')))
+
+# ---- Travis vars - without geographies ----
+# This is to get median income of Travis and percent of housing units built before 1990 in county
+travis_df <- get_acs(geography = "county", output = 'wide', county = 'Travis', state = 'TX', variables = extra_vars, geometry = FALSE)
+
+# create percent old homes and median income vars
+# rename GEOID to county_fips to not confuse it with tract GEOID
+travis_df <- travis_df %>% 
+  mutate(county_percent_built_before_1990 = 100 - (((B25034_002E + B25034_003E + B25034_004E + B25034_005E) / B25034_001E) * 100),
+         county_median_income = B19019_001E) %>% 
+  rename(county_fips = GEOID) %>% 
+  select(county_fips, county_percent_built_before_1990, county_median_income)
+
+# merge Travis median income and percent of housing units built before 1990 with tract data
+travis_census_final <- left_join(travis_census_condensed, travis_df, by = 'county_fips')
+
+# ---- Create "potentially gentrifying" tract measure ----
+# potentially gentrifying if BOTH percent of housing stock older than 1990 higher than rest of county AND median income below median income of county
+travis_census_final <- travis_census_final %>% 
+  mutate(gentrifying = ifelse(
+    percent_built_before_1990 > county_percent_built_before_1990 & median_income < county_median_income, 'Yes', 'No'),
+    gentrifying_dummy = ifelse(
+      percent_built_before_1990 > county_percent_built_before_1990 & median_income < county_median_income, 1, 0)
+    )
+
+# for one Census tract with 0 population, convert to NA so calculations later on also return NA
+travis_census_final$total_pop[travis_census_final$total_pop == 0] <- NA
+
+# ---- Import CDC 500 Cities health data ----
+cdc_vars <- read_csv('../data/500_Cities__Census_Tract-level_Data.csv')
+
+# keep access to health insurance and percent reporting bad mental health vars
+cdc_vars_condensed <- cdc_vars %>% 
+  select(TractFIPS, PlaceName, contains(c('ACCESS', 'MHLTH'))) %>% 
+  rename(GEOID = TractFIPS)
+
+# ---- Import eviction data from Eviction Lab ----
+# import GEOID column as string to match GEOID datatype of df's above (for merge)
+tx_evictions <- read_csv('../data/eviction_tracts.csv', col_types = cols(GEOID = col_character()))
+
+# Eviction Lab column names not easy to work with
+# clean them up quickly with clean_names function
+tx_evictions <- clean_names(tx_evictions)
+
+# summary(tx_evictions$eviction_filing_rate)
+
+# get only Travis tracts
+travis_tracts_evictions <- tx_evictions %>% 
+  filter(str_detect(parent_location, 'Travis')) 
+
+# create eviction rates and rent burden (and few other vars) df from eviction data
+# just use most recent year in data (2016)
+eviction_rent_vars_2016 <- travis_tracts_evictions %>% 
+  filter(year == 2016) %>%
+  select(geoid, contains(c('rent', 'rate'))) %>% 
+  rename(GEOID = geoid) # recapitalize to easily merge below
+
+# get average filing and eviction rates from 2011-2016 by tract
+avg_evictions_by_tract <- travis_tracts_evictions %>% 
+  filter(year > 2011) %>% 
+  group_by(geoid) %>% 
+  summarize(five_yr_avg_filing_rate = mean(eviction_filing_rate, na.rm = T),
+            five_yr_avg_eviction_rate = mean(eviction_rate, na.rm = T)) %>% 
+  rename(GEOID = geoid) # recapitalize to easily merge below
+
+# ---- Import crime reports data from CoA ----
+crime <- read_csv('../data/Crime_Reports.csv')
+
+# create year variable from date variable
+crime <- crime %>% 
+  mutate(year = substr(`Occurred Date`, 7,10))
+
+# subset to just last full five years (2015-2019)
+last_5yr <- crime %>% 
+  filter(year > 2014 & year < 2020)
+
+# get number of unique tracts in crime data
+# number is 287, more than 218 tracts in Travis
+# use a spatial join (below) to get more accurate counts by tract
+length(unique(last_5yr$`Census Tract`))
+
+# remove rows without lat/long for converting to spatial object below
+last_5yr_no_missing <- last_5yr %>% 
+  filter(!is.na(Latitude))
+
+# get map projection of Travis tracts df from Tidycensus
+# crs (epsg:4269); use that for crime data conversion below
+st_crs(travis_census_final)
+
+# convert crime data from df to spatial object
+sf_last_5yr <- st_as_sf(last_5yr_no_missing, coords = c("Longitude", "Latitude"), crs = 4269)
+
+# spatially join crime data (points) with Travis tracts (polygons)
+# use lengths to get the count of points in each polygon
+travis_census_final$crime_count <- lengths(st_intersects(travis_census_final, sf_last_5yr))
+
+# create var of 5-year average of crime counts by tract
+travis_census_final <- travis_census_final %>% 
+  mutate(reports_per_capita_5yr_avg = (crime_count / total_pop) / 5)
+
+# ---- Import potential low-wage job loss from Covid from Urban Institute
+urban_job_loss <- read_csv('../data/urban_inst_job_loss_by_tract.csv')
+
+# subset to just relevant vars
+urban_job_loss_condensed <- urban_job_loss %>% 
+  select(GEOID, X000, contains('worker')) %>% 
+  rename(estimated_li_job_loss = X000)
+
+# ---- Import in religious, civic orgs, and social services data ----
+relsoc <- read_csv('../../../Research/Ideas/social_capital/115967-V1/nanda_relcivsoc_tract_2006-2015_01P_csv_with_readme/nanda_relcivsoc_tract_2006-2015_01P.csv')
+
+relsoc_condensed <- relsoc %>% 
+  rename(GEOID = tract_fips10,
+         normed_rel_orgs = density_15_8131,
+         normed_civic_orgs = density_15_8134) %>%
+  select(GEOID, normed_rel_orgs, normed_civic_orgs)
+
+# ---- Import in social services data ----
+soc_service <- read_csv('../../../Research/Ideas/social_capital/117163-V1/nanda_socsvcs_tract_2006-2015_01P_csv_with_readme/nanda_socsvcs_tract_2006-2015_01P.csv')
+
+soc_service_condensed <- soc_service %>% 
+  rename(GEOID = tract_fips10,
+         normed_social_service_orgs = density_15_624) %>% 
+  select(GEOID, normed_social_service_orgs)
+
+# ---- Merge all dfs, keeping all census tracts ----
+# take out some vars
+full_data_merge <- list(travis_census_final, avg_evictions_by_tract, eviction_rent_vars_2016, cdc_vars_condensed, urban_job_loss_condensed, relsoc_condensed, soc_service_condensed) %>% 
+  reduce(left_join, by = 'GEOID') %>% 
+  select(-contains(c('CI', 'county', 'parent', 'Place'), ignore.case = FALSE)) %>% 
+  rename(percent_wo_health_insurance = ACCESS2_CrudePrev,
+         percent_reporting_bad_mental_health = MHLTH_CrudePrev) %>% 
+  mutate(reports_per_1k_5yr_avg = reports_per_capita_5yr_avg * 1000,
+         civic_orgs_per_1k = normed_civic_orgs * 1000,
+         rel_orgs_per_1k = normed_rel_orgs * 1000,
+         social_service_per_1k = normed_social_service_orgs * 1000)
+
+# diss_white_black_scaled = scale(diss_white_black),
+#          diss_white_hispanic_scaled = scale(diss_white_hispanic),
+
+# rename vars and create new ones for online table
+df_for_online_table <- full_data_merge %>% 
+  select(GEOID,
+         'Total Population' = total_pop,
+         'Pct Rent Burdened' = rent_burden,
+         'Avg Annual Eviction Rate (2011-2016)' = five_yr_avg_eviction_rate,
+         'Pct Overcrowded Rental Units' = percent_overcrowded_rentals,
+         'Pct Studios or One Bdrms' = percent_studio_1bd,
+         'Hsg Units per Sq. Mile' = units_per_sqmi,
+         'Potentially Gentrifying' = gentrifying,
+         'Pct Reporting Poor Mental Health' = percent_reporting_bad_mental_health,
+         'Pct Without Health Insurance' = percent_wo_health_insurance,
+         'Pct One-person Households' = percent_living_alone,
+         'Pct Veterans' = percent_veteran,
+         'Pct Black' = percent_nhblack,
+         'Pct Hispanic' = percent_hispanic,
+         # 'Black-White Segregation (scaled)' = diss_white_black_scaled,
+         # 'Hispanic-NHWhite Segregation (scaled)' = diss_white_hispanic_scaled,
+         'Avg Crime Reports per 1K (2015-2019)' = reports_per_1k_5yr_avg,
+         'Est Low-Income Job Loss Due to Covid-19' = estimated_li_job_loss,
+         'Civic Orgs per 1K' = civic_orgs_per_1k,
+         'Rel Orgs per 1K' = rel_orgs_per_1k,
+         'Social Service Orgs per 1K' = social_service_per_1k)
+```
+
+```{r}
+# ---- Quick correlation matrix ----
+# full_data_merge %>% 
+#   st_drop_geometry() %>% 
+#   select(., is.numeric) %>% 
+#   cor(use = "pairwise.complete.obs")
+
+# ---- Quick regression output ----
+# OLS regression of five-year average eviction rate on a bunch of IVs
+# summary(lm(five_yr_avg_eviction_rate ~ percent_nhblack + percent_hispanic + percent_living_alone + percent_veteran + percent_overcrowded_rentals + percent_studio_1bd + units_per_sqmi + gentrifying_dummy + reports_per_capita_5yr_avg + rent_burden + percent_wo_health_insurance + percent_reporting_bad_mental_health, data = full_data_merge))
+```
+
+```{r, include=FALSE}
+# ---- Create scaled dataset to calculate Vulnerability Index
+scaled_df <- full_data_merge %>%
+  mutate_if(is.numeric, scale)
+
+# ---- Create Index ----
+# create variables that need to be reversed for the scale
+# create additive scale (one of a few options for doing this)
+# break up scale using jenks-fisher algorithm using 7 bins
+# scale goes from 1 to 7, with 7 being most vulnerable tracts
+scaled_df <- scaled_df %>% 
+  mutate(studio_1bd_inverse = percent_studio_1bd * -1,
+         civic_orgs_inverse = normed_civic_orgs * -1,
+         rel_orgs_inverse = normed_rel_orgs * -1,
+         soc_orgs_inverse = normed_social_service_orgs * -1,
+         additive_index = percent_living_alone + percent_veteran + percent_overcrowded_rentals + studio_1bd_inverse + gentrifying_dummy + reports_per_capita_5yr_avg + five_yr_avg_eviction_rate + rent_burden + percent_wo_health_insurance + percent_reporting_bad_mental_health + estimated_li_job_loss + civic_orgs_inverse + rel_orgs_inverse + soc_orgs_inverse,
+         additive_index = as.numeric(additive_index))
+
+scaled_df$index_fisher = cut(scaled_df$additive_index, breaks = classInt::classIntervals(scaled_df$additive_index, n = 7, style = 'fisher')$brks, labels = FALSE)
+
+scaled_to_merge <- scaled_df %>% 
+  select(GEOID,
+         'Black-White Segregation (scaled)' = diss_white_black,
+         'Hispanic-NHWhite Segregation (scaled)' = diss_white_hispanic,
+         'NVI' = index_fisher) %>% 
+  st_drop_geometry()
+
+final_online_table <- inner_join(df_for_online_table, scaled_to_merge, by = 'GEOID')
+
+# st_write(final_online_table, 'data/final_data.shp')
+
+# summary(final_online_table$NVI)
+
+# table(scaled_df$index_fisher)
+```
+
+```{r}
+# tmap_mode('plot')
+# 
+# gent <- tm_shape(final_online_table) +
+#   tm_polygons('Potentially Gentrifying') +
+#   tm_layout(frame = FALSE)
+# 
+# gent
+# 
+# tmap_save(gent, filename = "gentrifying.png")
+# 
+# insurance <- tm_shape(final_online_table) +
+#   tm_polygons('Pct Reporting Poor Mental Health') +
+#   tm_layout(frame = FALSE)
+# 
+# gent
+# 
+# tmap_save(insurance, filename = "insurance.png")
+# 
+# crime <- tm_shape(final_online_table) +
+#   tm_polygons('Avg Crime Reports per 1K (2015-2019)') +
+#   tm_layout(frame = FALSE)
+# 
+# crime
+# 
+# tmap_save(crime, filename = "crime.png")
+# 
+# job_loss <- tm_shape(final_online_table) +
+#   tm_polygons('Est Low-Income Job Loss Due to Covid-19') +
+#   tm_layout(frame = FALSE)
+# 
+# job_loss
+# 
+# tmap_save(job_loss, filename = "job_loss.png")
+```
+
+```{r}
+# ---- Two ways to quickly map index ----
+
+# # using tmap
+# tm_shape(scaled_df) +
+#   tm_polygons('index_fisher')
+# 
+# # using mapview
+# mapview(scaled_df, zcol = 'index_fisher')
+```
+
+
+Vulnerability Index
+=============================================================
+
+```{r map, message=FALSE, warning=FALSE}
+
+mapview(final_online_table, zcol = 'NVI', col.regions=brewer.pal(7, "BuGn"), legend = TRUE, layer.name = 'Index')
+
+```
+
+Indicators by Census Tract
+===========================================================
+
+```{r, include=FALSE}
+
+# take out geometry from df
+df_no_geom <- st_drop_geometry(final_online_table)
+
+# round numeric columns to 2 sig digits
+df_no_geom <- df_no_geom %>% 
+  mutate_if(is.numeric, round, digits = 2)
+
+# make a shareable dataframe for interactive feature
+travis_tracts_table <- SharedData$new(df_no_geom)
+
+# create html table
+html_table <- datatable(travis_tracts_table, rownames = FALSE, style="bootstrap", class="compact", width="100%", options=list(order = list(1, "desc"), pageLength = 25))
+
+```
+
+Filters {.sidebar}
+-----------------------------------------------------------------------
+Use **sliders** and **checkboxes** to filter table. Refresh your browser to restart filtering.
+
+```{r}
+filter_slider("Pct Rent Burdened", "Percent Rent Burdened", travis_tracts_table, column=~`Pct Rent Burdened`, round = 2)
+
+filter_slider("Pct Without Health Insurance", "Percent Without Health Insurance", travis_tracts_table, column=~`Pct Without Health Insurance`, round = 2)
+
+filter_slider("Black-White Segregation (scaled)", "Black-White Segregation (scaled)", travis_tracts_table, column=~`Black-White Segregation (scaled)`, round = 2)
+
+filter_checkbox("Potentially Gentrifying", "Potentially Gentrifying?", travis_tracts_table, ~`Potentially Gentrifying`, inline = TRUE)
+```
+
+Column
+-----------------
+
+### 
+
+```{r}
+html_table
+```
