@@ -151,12 +151,11 @@ tracts_with_index <- tracts %>%
 
 tracts_with_index$NewIndex =cut(tracts_with_index$index, breaks = classInt::classIntervals(tracts_with_index$index, n = 5, style = 'fisher')$brks, labels = FALSE)
 
-tracts_with_index <- tracts_with_index %>% 
-  st_transform(crs = 4326) %>%
-  # mutate(Vulnerability = as.factor(NewIndex))
-  rename(Vulnerability = NewIndex)
+tracts_with_index_full <- tracts_with_index %>% 
+  mutate(Vulnerability = replace_na(NewIndex, 1)) %>% 
+  st_transform(crs = 4326) 
 
-tracts_sf_index_orig_data <- tracts_with_index %>% 
+tracts_sf_index_orig_data <- tracts_with_index_full %>% 
   select(GEOID, Name.x, Vulnerability) %>% 
   inner_join(dfs_condensed)
 
@@ -305,10 +304,10 @@ area_popup <- paste0("<b>Census Tract:</b> ", tracts_sf_index_orig_data$Name.x,
   lapply(htmltools::HTML)
 
 leaflet(tracts_sf_index_orig_data) %>%
-  setView(-97.726871, 30.307905, zoom = 10) %>% 
+  setView(-97.726871, 30.307905, zoom = 10) %>%
+  addProviderTiles(providers$CartoDB.Positron, group = "CartoDB") %>%
   addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
   addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
-  addProviderTiles(providers$CartoDB.Positron, group = "CartoDB") %>%
   addPolygons(fillColor = ~pal(Vulnerability),
               fillOpacity = .9,
               color = "black",
@@ -323,7 +322,7 @@ leaflet(tracts_sf_index_orig_data) %>%
                                            weight = 0.1)) %>%
   addPolygons(data = city_council_shape,
               fillColor = 'gray',
-              fillOpacity = .6,
+              fillOpacity = .4,
               color = "red",
               weight = 1.25,
               popup = paste("<b>Council District:</b> ", city_council_shape$council_di),
@@ -342,7 +341,7 @@ leaflet(tracts_sf_index_orig_data) %>%
             group = "Neighborhood Vulnerability") %>%
   # Layers control
   addLayersControl(
-    baseGroups = c("Toner Lite", "Toner", "CartoDB"),
+    baseGroups = c("CartoDB", "Toner Lite", "Toner"),
     overlayGroups = c("Vulnerability", "City Council District"),
     options = layersControlOptions(collapsed = FALSE)
   ) %>% 
@@ -362,6 +361,8 @@ evic_monthly <- read_csv('austin_monthly_2020_2021.csv') %>%
   mutate(Month = parse_date_time(month, "my"),
          Month = as.Date(Month))
 
+tltip_evictions <- tooltip_table('Eviction Filings: ', sprintf("{point.%s:.0f}", c('Eviction Filings')))
+
     # Year = year(month),
     #      Month = month(month),
     #      Month_Year = ymd(paste0(Year, "-",
@@ -374,7 +375,17 @@ evic_by_month <- evic_monthly %>%
   arrange(desc(`Eviction Filings`)) %>% 
   filter(Month <= '2022-07-01')
 
-evic_hchart <- hchart(evic_by_month, type = 'column', hcaes(x = Month, y = `Eviction Filings`))
+evic_hchart <- hchart(evic_by_month, type = 'column', hcaes(x = Month, y = `Eviction Filings`)) %>% 
+  hc_tooltip(
+    useHTML = TRUE,
+    headerFormat = "",
+    pointFormat = tltip_evictions
+    )  %>% 
+  hc_credits(
+    enabled = TRUE, text = "Source: Eviction Lab",
+    href = "https://evictionlab.org/eviction-tracking/austin-tx/",
+    style = list(fontSize = "12px")
+  )
 
 # ggplot(evic_by_month) +
 #   geom_col(aes(x = Month, y = filings_2020))
@@ -395,30 +406,45 @@ rent <- tibble::rownames_to_column(rent, 'Date') %>%
 
 rent$Month <- as.Date(as.yearmon(rent$Date))
 
-avg_rent_plot <- ggplot(rent, aes(x = Date, y = `Average Rent`)) +
-  geom_line(color = '#66c2a5', size = 1) +
-  scale_x_date(date_labels = '%Y', date_breaks = '1 year') +
-  scale_y_continuous(labels = scales::dollar_format(),
-                     limits = c(1000, 2000)) +
-  labs(title = 'Seasonally Adjusted Average Rent in Austin',
-       subtitle = 'January 2014 - May 2022',
-       x = NULL,
-       y = NULL, 
-       caption = "Source: Zillow\nSee https://www.zillow.com/research/data/") +
-  theme_minimal() +
-  theme(legend.position = "none",
-        legend.title = element_blank(),
-        plot.title.position = "plot",
-        panel.grid.minor = element_blank(),
-        panel.grid.major.x = element_blank(),
-        axis.text = element_text(size = 12))
+tltip_rent <- tooltip_table('Average Rent: ', sprintf("{point.%s:.0f}", c('Average Rent')))
+
+# avg_rent_plot <- ggplot(rent, aes(x = Date, y = `Average Rent`)) +
+#   geom_line(color = '#66c2a5', size = 1) +
+#   scale_x_date(date_labels = '%Y', date_breaks = '1 year') +
+#   scale_y_continuous(labels = scales::dollar_format(),
+#                      limits = c(1000, 2000)) +
+#   labs(title = 'Seasonally Adjusted Average Rent in Austin',
+#        subtitle = 'January 2014 - May 2022',
+#        x = NULL,
+#        y = NULL, 
+#        caption = "Source: Zillow\nSee https://www.zillow.com/research/data/") +
+#   theme_minimal() +
+#   theme(legend.position = "none",
+#         legend.title = element_blank(),
+#         plot.title.position = "plot",
+#         panel.grid.minor = element_blank(),
+#         panel.grid.major.x = element_blank(),
+#         axis.text = element_text(size = 12))
 
 # avg_rent_plot
 
 rent_2020_present <- rent %>% 
   filter(Month >= '2020-01-01')
 
-rent_hchart <- hchart(rent_2020_present, type = 'line', hcaes(x = Month, y = `Average Rent`))
+rent_hchart <- hchart(rent_2020_present, type = 'line', hcaes(x = Month, y = `Average Rent`)) %>% 
+  hc_tooltip(
+    useHTML = TRUE,
+    headerFormat = "",
+    pointFormat = tltip_rent
+    )  %>% 
+  hc_caption(
+    text = "The mean of listed rents that fall into the 40th to 60th percentile range for all homes and apartments in a given region. See source for more information."
+  ) %>% 
+  hc_credits(
+    enabled = TRUE, text = "Source: Zillow",
+    href = "https://www.zillow.com/research/data/",
+    style = list(fontSize = "12px")
+  )
 
 # ggplot(evic_by_month) +
 #   geom_col(aes(x = Month, y = filings_2020))
@@ -447,7 +473,7 @@ ggplot(mapping = aes(x = rent_burden, y = people_per_1k)) +
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
   labs(x = "Rent Burden",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -463,7 +489,7 @@ ggplot(mapping = aes(x = percent_overcrowded_rentals, y = people_per_1k)) +
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
   labs(x = "Pct in Overcrowded Rental Unit",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -557,7 +583,7 @@ ggplot(mapping = aes(x = filing_rate_5yr, y = people_per_1k)) +
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
   labs(x = "Eviction Filing Rate",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -575,7 +601,7 @@ ggplot(mapping = aes(x = as.factor(Gentrifying), y = people_per_1k)) +
     color = "#08519c", fill = "#0072B280"
   ) + 
   labs(x = "Gentrifying",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -669,7 +695,7 @@ ggplot(mapping = aes(x = percent_wo_health_insurance, y = people_per_1k)) +
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
   labs(x = "Pct Without Health Insurance",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -685,7 +711,7 @@ ggplot(mapping = aes(x = percent_reporting_bad_mental_health, y = people_per_1k)
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
   labs(x = "Pct Reporting Bad Mental Health",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -777,7 +803,7 @@ ggplot(mapping = aes(x = poverty_rate, y = people_per_1k)) +
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
   labs(x = "Poverty Rate",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -793,7 +819,7 @@ ggplot(mapping = aes(x = Percent_Unemployed, y = people_per_1k)) +
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
   labs(x = "Unemployment Rate",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -885,7 +911,7 @@ ggplot(mapping = aes(x = percent_nhblack, y = people_per_1k)) +
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
   labs(x = "Pct Black",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -901,7 +927,7 @@ ggplot(mapping = aes(x = percent_hispanic, y = people_per_1k)) +
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
   labs(x = "Pct Hispanic",
-       y = "Homelessness Rate") +
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -993,8 +1019,8 @@ ggplot(mapping = aes(x = social_service_orgs_per1k, y = people_per_1k)) +
     color = "#08519c", fill = "#0072B280"
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
-  labs(x = "Social Service Orgs Per 1000 People",
-       y = "Homelessness Rate") +
+  labs(x = "Social Service Orgs Per 1,000 People",
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
@@ -1012,8 +1038,8 @@ ggplot(mapping = aes(x = civic_orgs_per1k, y = people_per_1k)) +
     color = "#08519c", fill = "#0072B280"
   ) + 
   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
-  labs(x = "Civic Orgs Per 1000 People",
-       y = "Homelessness Rate") +
+  labs(x = "Civic Orgs Per 1,000 People",
+       y = "Homelessness Rate (Per 1,000 People)") +
   theme_minimal_grid() +
   theme(axis.text = element_text(size = 6),
         axis.title = element_text(size = 7))
