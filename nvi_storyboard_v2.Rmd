@@ -1,0 +1,1290 @@
+---
+title: "Travis County Homelessness Vulnerability"
+subtitle: "Neighborhood Structural Factors"
+output: 
+  flexdashboard::flex_dashboard:
+    # logo: echologosmallwhite.png
+    orientation: columns
+    vertical_layout: fill
+    social: menu
+    css: styles.css
+    # source_code: embed
+    theme: readable
+    navbar:
+        - { icon: "fa-twitter", href: "https://twitter.com/atxecho", align: right}
+        - { icon: "fa-facebook", href: "https://www.facebook.com/atxecho", align: right}
+---
+
+<!-- Makes the logo link to the ECHO Website -->
+
+<!-- ```{=html} -->
+<!-- <script> -->
+<!-- $('.navbar-logo').wrap('<a href="http://www.austinecho.org" target=_blank>'); -->
+<!-- </script> -->
+<!-- ``` -->
+
+```{r setup, include=T}
+library(ggiraph)
+library(tidyverse)
+library(gfonts)
+library(gt)
+library(sf)
+library(flextable)
+library(tigris)
+library(cowplot)
+library(patchwork)
+library(leaflet)
+library(reactable)
+library(tidycensus)
+library(highcharter)
+library(lubridate)
+library(zoo)
+
+options(tigris_use_cache = TRUE)
+
+tooltip_css <- "font-size:20px;padding:2px 4px 2px 4px;background:black;color:white;border-radius:2px 2px 2px 2px;"
+```
+
+```{r setup-data, include=F}
+# travis_tracts <- read_sf('counts_with_census_indicators.shp')
+
+# travis_tracts <- get_acs(geography = 'tract', output = 'wide', state = 'TX', county = 'Travis', year = 2019, table = 'B03002', geometry = TRUE)
+# 
+# # create variables, create county FIPS var, and subset df
+# travis_tracts <- travis_tracts %>%
+#   rename(nonhisp = B03002_002E,
+#          nhwhite = B03002_003E,
+#          nhblack = B03002_004E,
+#          hispanic = B03002_012E, 
+#          total_pop = B03002_001E) %>% 
+#   mutate(county_fips = substr(GEOID, 1,5)) %>%
+#   select(GEOID, nonhisp, nhwhite, nhblack, hispanic, total_pop, county_fips) %>%
+#   arrange(GEOID, county_fips)
+
+old_df <- read_csv('counts_with_census_indicators.csv')
+
+updated_measures_oct2022 <- read_csv('new_gentrification_rent_measures_2010_2019.csv')
+
+health_services_2017 <- read_csv('travis_tract_health_services_2017.csv')
+
+# groceries_2017 <- read_csv('travis_groceries_2017.csv')
+
+dfs_merged <- old_df %>% 
+  left_join(updated_measures_oct2022, by = 'GEOID')
+
+# table(dfs_merged$gentrifying, dfs_merged$gentrifying_using_educ_and_rent_or_hsg_value)
+
+# cor.test(dfs_merged$percent_uninsured, dfs_merged$percent_wo_health_insurance)
+# 
+# summary(dfs_merged$percent_uninsured)
+# 
+# summary(dfs_merged$percent_wo_health_insurance)
+
+# this imports 2 years worth of CA data, so wanting to create a 1-year average
+tract_counts_08172022 <- read_csv('tract_CA_counts_08172022.csv') %>% 
+  rename(GEOID = TRACT) %>% 
+  mutate(People1Year = TotalPeople / 2,
+         Counts1Year = TotalCount / 2)
+
+city_council_shape <- st_read('Council Districts Fill/geo_export_13ef2abd-940d-4fd5-ad7a-499a788486f9.shp')
+  
+
+# st_crs(city_council_shape)
+
+# counts_pop <- tract_counts_08172022 %>% 
+#   inner_join(travis_tracts)
+# 
+# sum(tract_counts_08172022$TotalCount)
+
+# t <- tract_counts_08172022 %>% 
+#   filter(!GEOID %in% travis_tracts$GEOID)
+# 
+# sum(t$TotalPeople)
+
+dfs_merged_with_newcounts <- dfs_merged %>% 
+  inner_join(tract_counts_08172022) %>% 
+  inner_join(health_services_2017) 
+# %>% 
+#   inner_join(groceries_2017)
+
+dfs_merged_clean_condensed <- dfs_merged_with_newcounts %>% 
+  mutate(people_per_capita = People1Year/total_pop,
+         people_per_1k = People1Year/total_pop * 1000,
+         people_per_5k = People1Year/total_pop * 5000,
+         # rel_orgs_per5k = rel_orgs_per1k * 5,
+         social_service_orgs_per5k = social_service_orgs_per1k * 5,
+         civic_orgs_per5k = civic_orgs_per1k * 5,
+         # log_counts_per_capita = TotalCount/total_pop,
+         AtRisk = ifelse(atrisk_gentrifying_dummy == 1, 'Yes', 'No'),
+         Gentrifying = ifelse(gentrifying_using_educ_and_rent_or_hsg_value == 1, 'Yes', 'No'),
+         allhealth_popden = popden_621 + popden_622 + popden_623 + popden_446110) %>% 
+  select(GEOID, total_pop, people_per_5k, percent_uninsured, poverty_rate_2019, Percent_Unemployed, percent_rent_burdened_2019, percent_extreme_rent_burdened_2019, rent_pct_increase, value_pct_increase, atrisk_gentrifying_dummy, gentrifying_using_educ_and_rent_or_hsg_value, filing_rate_5yr, percent_overcrowded_rentals, percent_hispanic, percent_nhblack, percent_nhwhite, allhealth_popden)
+
+# rent_pct_increase, atrisk_gentrifying_dummy, civic_orgs_per1k, social_service_orgs_per1k, rel_orgs_per1k
+
+# cor.test(dfs_merged_with_newcounts$rent_burden, dfs_merged_with_newcounts$percent_rent_burdened_2019)
+# 
+# cor.test(dfs_merged_with_newcounts$poverty_rate, dfs_merged_with_newcounts$poverty_rate_2019)
+
+# cor.test(dfs_merged_with_newcounts$Counts, dfs_merged_with_newcounts$TotalCount)
+
+# t <- dfs_merged %>% 
+#   mutate(Tract = as.character(GEOID)) %>% 
+#   arrange(desc(Counts))
+
+# using new CA counts
+# dfs_condensed <- dfs_merged_with_newcounts %>%
+#   dplyr::select(GEOID, total_pop, People1Year, percent_wo_health_insurance, percent_reporting_bad_mental_health, poverty_rate, Percent_Unemployed, gentrifying_dummy, rent_burden, filing_rate_5yr, percent_overcrowded_rentals, percent_hispanic, percent_nhblack, percent_nhwhite, units_per_sqmi, avg_monthly_reports_per_1k, civic_orgs_per1k, social_service_orgs_per1k, rel_orgs_per1k)
+
+# using new CA counts and new gentrification/rent measures
+# dfs_condensed_updated <- dfs_merged_with_newcounts %>%
+#   dplyr::select(GEOID, total_pop, People1Year, percent_wo_health_insurance, percent_reporting_bad_mental_health, poverty_rate_2019, Percent_Unemployed, atrisk_gentrifying_dummy, median_gross_rent_2019, percent_rent_burdened_2019, percent_extreme_rent_burdened_2019, rent_pct_increase, value_pct_increase, gentrifying_using_educ_rent, gentrifying_using_educ_hsg_value, gentrifying_using_educ_and_rent_or_hsg_value, filing_rate_5yr, percent_overcrowded_rentals, percent_hispanic, percent_nhblack, percent_nhwhite, units_per_sqmi, avg_monthly_reports_per_1k, civic_orgs_per1k, social_service_orgs_per1k, rel_orgs_per1k)
+
+# df_no_missing <- dfs_condensed %>%
+#   na.omit()
+
+dfs_for_fa <- dfs_merged_clean_condensed %>%
+  dplyr::select(-GEOID, -total_pop, -percent_hispanic, -percent_nhblack, -percent_nhwhite)
+
+
+
+dfs_for_fa_no_missing <- dfs_for_fa %>%
+  na.omit()
+
+# df_no_missing_nogeoid <- df_no_missing %>%
+#   dplyr::select(-GEOID)
+
+# summary(lm(data = df_no_missing_nogeoid_updated, people_per_1k ~ percent_wo_health_insurance + percent_reporting_bad_mental_health + poverty_rate_2019 + Percent_Unemployed + percent_rent_burdened_2019 + value_pct_increase + gentrifying_using_educ_and_rent_or_hsg_value + filing_rate_5yr + percent_overcrowded_rentals + percent_hispanic + percent_nhblack + percent_nhwhite))
+
+fa_test_updated <- factanal(dfs_for_fa_no_missing, factors = 4, rotation = 'none')
+
+fa_test_updated
+ 
+loadings_df <- as.data.frame(unclass(fa_test_updated$loadings))
+
+loadings_df_with_final_scaling <- loadings_df %>% 
+  mutate(WeightedFactorScore = (Factor1*.57 + Factor2*.28 + Factor3*.15) / 3)
+
+dfs_scaled_index <- dfs_merged_clean_condensed %>%
+  dplyr::select(-GEOID, -total_pop, -percent_hispanic, -percent_nhblack, -percent_nhwhite) %>%  
+  mutate(across(where(is.numeric), scale))
+
+# loadings_df_with_final_scaling$WeightedFactorScore[1]
+
+# dfs_scaled_index <- dfs_scaled %>% 
+#   dplyr::select(People1Year, percent_wo_health_insurance, percent_reporting_bad_mental_health, poverty_rate, Percent_Unemployed, gentrifying_dummy, rent_burden, filing_rate_5yr, percent_overcrowded_rentals, percent_hispanic, percent_nhblack, percent_nhwhite, avg_monthly_reports_per_1k, social_service_orgs_per1k)
+
+dfs_scaled_index$people_per_5k <- dfs_scaled_index$people_per_5k*loadings_df_with_final_scaling$WeightedFactorScore[1]
+dfs_scaled_index$percent_uninsured <- dfs_scaled_index$percent_uninsured*loadings_df_with_final_scaling$WeightedFactorScore[2]
+dfs_scaled_index$poverty_rate_2019 <- dfs_scaled_index$poverty_rate_2019*loadings_df_with_final_scaling$WeightedFactorScore[3]
+dfs_scaled_index$Percent_Unemployed <- dfs_scaled_index$Percent_Unemployed*loadings_df_with_final_scaling$WeightedFactorScore[4]
+dfs_scaled_index$percent_rent_burdened_2019 <- dfs_scaled_index$percent_rent_burdened_2019*loadings_df_with_final_scaling$WeightedFactorScore[5]
+dfs_scaled_index$percent_extreme_rent_burdened_2019 <- dfs_scaled_index$percent_extreme_rent_burdened_2019*loadings_df_with_final_scaling$WeightedFactorScore[6]
+dfs_scaled_index$rent_pct_increase <- dfs_scaled_index$rent_pct_increase*loadings_df_with_final_scaling$WeightedFactorScore[7]
+dfs_scaled_index$value_pct_increase <- dfs_scaled_index$value_pct_increase*loadings_df_with_final_scaling$WeightedFactorScore[8]
+dfs_scaled_index$atrisk_gentrifying_dummy <- dfs_scaled_index$atrisk_gentrifying_dummy*loadings_df_with_final_scaling$WeightedFactorScore[9]
+dfs_scaled_index$gentrifying_using_educ_and_rent_or_hsg_value <- dfs_scaled_index$gentrifying_using_educ_and_rent_or_hsg_value*loadings_df_with_final_scaling$WeightedFactorScore[10]
+dfs_scaled_index$filing_rate_5yr <- dfs_scaled_index$filing_rate_5yr*loadings_df_with_final_scaling$WeightedFactorScore[11]
+# dfs_scaled_index$units_per_sqmi <- dfs_scaled_index$units_per_sqmi*-.117
+dfs_scaled_index$percent_overcrowded_rentals <- dfs_scaled_index$percent_overcrowded_rentals*loadings_df_with_final_scaling$WeightedFactorScore[12]
+dfs_scaled_index$allhealth_popden <- dfs_scaled_index$allhealth_popden*loadings_df_with_final_scaling$WeightedFactorScore[13]
+
+dfs_scaled_index <- dfs_scaled_index %>% 
+  replace(is.na(.),0) %>%
+  mutate(nvi = rowSums(.))
+
+tracts <- tracts(state = 'TX', county = 'Travis', year = '2019') %>% 
+  dplyr::select(GEOID) %>% 
+  mutate(GEOID = as.numeric(GEOID))
+
+dfs_scaled_index_withGEOID <- cbind(dfs_scaled_index, dfs_merged[c("GEOID")])
+
+dfs_scaled_index_withGEOID <- cbind(dfs_scaled_index_withGEOID, dfs_merged[("Name.x")])
+
+tracts_with_index <- tracts %>% 
+  inner_join(dfs_scaled_index_withGEOID) %>% 
+  mutate(nvi = case_when(GEOID %in% c(48453000601, 48453000603, 48453000604) ~ NA_real_,
+                         TRUE ~ nvi))
+
+tracts_with_index$NewIndex =cut(tracts_with_index$nvi, breaks = classInt::classIntervals(tracts_with_index$nvi, n = 5, style = 'fisher')$brks, labels = FALSE)
+
+tracts_with_index_full <- tracts_with_index %>% 
+  mutate(Vulnerability = case_when(is.na(NewIndex) == TRUE & is.na(nvi) == FALSE ~ 1,
+                                   is.na(NewIndex) == TRUE ~ NA_real_,
+                                   TRUE ~ as.numeric(NewIndex))) %>% 
+  st_transform(crs = 4326) 
+
+tracts_sf_index_orig_data <- tracts_with_index_full %>% 
+  select(GEOID, Name = Name.x, Vulnerability) %>% 
+  inner_join(dfs_merged_clean_condensed)
+
+tracts_map <- tracts_sf_index_orig_data %>%
+  ggplot() +
+  geom_sf(data = tracts_sf_index_orig_data, color="#dddddd", fill="#f2f2f2", lwd=.3) +
+  geom_sf_interactive(aes(fill=Vulnerability, tooltip=tooltip, data_id = Name), lwd=.3) +
+  # scale_fill_gradientn(colours = tinter("#5da5da", steps = 5), labels = function(x) paste0(x,"Cases")) +
+  coord_sf(datum=NA)
+
+df_final <- tracts_sf_index_orig_data %>% 
+  mutate(AtRisk = ifelse(atrisk_gentrifying_dummy == 1, 'Yes', 'No'),
+         Gentrifying = ifelse(gentrifying_using_educ_and_rent_or_hsg_value == 1, 'Yes', 'No'),
+         rent_pct_increase = rent_pct_increase * 100,
+         value_pct_increase = value_pct_increase * 100)
+
+# mod1 <- lm(data = tracts_sf_index_orig_data, people_per_capita ~ rent_burden)
+# 
+# summary(mod1)
+
+# people_per_1k_map <- ggplot(tracts_sf_index_orig_data) +
+#   geom_sf(aes(fill = people_per_1k)) +
+#   theme_void() +
+#   scale_fill_distiller(palette = 'BuGn', direction = 1, name = 'People per 1K')
+
+# ggsave(people_per_1k_map, filename = 'test_map.png')
+
+# vul_index_map_simple <- ggplot(tracts_sf_index_orig_data) +
+#   geom_sf(aes(fill = Vulnerability)) +
+#   theme_void() +
+#   scale_fill_distiller(palette = 'BuGn', direction = 1, name = 'Vulnerability')
+# 
+# ggsave(vul_index_map_simple, filename = 'vul_index_map_simple.png')
+
+```
+
+<!-- <style> -->
+
+<!-- All white background -->
+<!-- body {background-color: #ffffff;} -->
+<!-- .tab-content>.dashboard-page-wrapper.active {background-color: #ffffff} -->
+
+<!-- .dashboard-page-wrapper { -->
+<!--   align-items: center; -->
+<!-- } -->
+
+<!-- Text centering -->
+<!-- h1, .h1, strong, .strong {text-align: center;} -->
+<!-- h2 {text-align: center;} -->
+<!-- h3 {text-align: center;} -->
+<!-- h4 {text-align: center;} -->
+
+<!-- </style> -->
+
+<!-- # Overview -->
+
+<!-- START OF INTRO -->
+
+<!-- <div style="max-width:1000px; width: 100%; padding: 0 20px;"> -->
+
+<!-- <h1 style="font-size:28px;"> -->
+<!-- <h3 style="font-size:22px;"> -->
+<!-- <h4 style="font-size:18px;"> -->
+
+<!-- <h1><strong> -->
+
+<!-- <center>Travis County Homelessness Vulnerability</center> -->
+
+<!-- </strong> -->
+
+<!-- </h1> -->
+
+<!-- <br> -->
+
+<!-- <h3><strong>The Structural Factors That Explain Homelessness</strong></h3> -->
+
+<!-- <br> -->
+
+<!-- <p style="font-size:18px;"> -->
+
+<!-- Why does someone become homeless? Why has homelessness gone up in recent months? Why are there more people experiencing homelessness in Austin/Travis County than other cities in Texas? We at the Ending Community Homelessness Coalition (ECHO) get these kinds of questions often.  -->
+
+Vulnerability Index Map {data-navmenu="Overview"}
+===================================== 
+
+Column {data-width=225}
+-------------------------------------
+
+### **About This Site**
+
+Why does someone experience homelessness? Why does the rate of homelessness fluctuate from month to month or year to year? Using publicly available data and information about where people in Travis County lose their housing, we show that homelessness is a **structural problem**, one that can be prevented by addressing underlying **socioeconomic conditions**. 
+
+To show where the risk of becoming homeless is greatest, we have created a **Homelessness Vulnerability Index** that incorporates socioeconomic data at the Census Tract level.
+
+The interactive map to the right and the buttons above allow you to dig into the data and see how homelessness is correlated with a number of socioeconomic conditions.
+
+<center>
+  <a href="https://www.austinecho.org">
+  <img style="margin-top: 2em;" src="logo.png" width="150"></a>
+</center>
+
+Column {data-width=625}
+-------------------------------------
+
+### **Travis County Homelessness Vulnerability Index**
+
+```{r map,echo=F}
+# girafe(ggobj = tracts_map, width_svg = 10, height_svg = 5,
+#        options = list(
+#          opts_tooltip(css = "padding:5px;background:white;border-radius:2px 2px 2px 2px;"),
+#          opts_hover_inv(css = "opacity:0.5;"),
+#          opts_hover(css = "stroke-width:2;")
+#        ))
+
+pal <- colorFactor(palette = "Blues", domain = tracts_sf_index_orig_data$Vulnerability)
+
+area_popup <- paste0("<b>Census Tract:</b> ", tracts_sf_index_orig_data$Name,
+                     "<br><b>Vulnerability:</b> ", tracts_sf_index_orig_data$Vulnerability,
+                     "<br><b>Pct Rent Burdened:</b> ", tracts_sf_index_orig_data$percent_rent_burdened_2019,
+                     "<br><b>Gentrifying?:</b> ", tracts_sf_index_orig_data$gentrifying_using_educ_and_rent_or_hsg_value,
+                     "<br><b>Eviction Rate:</b> ", tracts_sf_index_orig_data$filing_rate_5yr,
+                    '<br><b>Pct Uninsured:</b> ', tracts_sf_index_orig_data$percent_uninsured,
+                    '<br><b>Poverty Rate:</b> ', tracts_sf_index_orig_data$poverty_rate_2019) %>%
+  lapply(htmltools::HTML)
+
+leaflet(df_final) %>%
+  setView(-97.726871, 30.307905, zoom = 10) %>%
+  addProviderTiles(providers$CartoDB.Positron, group = "CartoDB") %>%
+  addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+  addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
+  addPolygons(fillColor = ~pal(Vulnerability),
+              fillOpacity = .9,
+              color = "black",
+              weight = .5,
+              label = ~area_popup,
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "3px 8px"),
+                textsize = "15px",
+                direction = "auto"),
+              group = "Vulnerability",
+              highlight = highlightOptions(color = "white",
+                                           weight = 0.1)) %>%
+  addPolygons(data = city_council_shape,
+              fillColor = 'gray',
+              fillOpacity = .4,
+              color = "orange",
+              weight = 2,
+              popup = paste("<b>Council District:</b> ", city_council_shape$council_di),
+              popupOptions = popupOptions(
+                style = list("font-weight" = "normal"),
+                textsize = "15px",
+                direction = "auto"),
+              group = "Austin Council District",
+              highlight = highlightOptions(color = "red",
+                                           weight = .5)) %>% 
+  addLegend(data = tracts_sf_index_orig_data,
+            position = "bottomright",
+            pal = pal,
+            values = ~Vulnerability,
+            title = "Homelessness Vulnerability",
+            group = "Homelessness Vulnerability") %>%
+  # Layers control
+  addLayersControl(
+    baseGroups = c("CartoDB", "Toner Lite", "Toner"),
+    overlayGroups = c("Vulnerability", "Austin Council District"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>% 
+  hideGroup("Austin Council District")
+```
+
+Recent Rent and Eviction Data {data-navmenu="Overview"}
+=========================================
+
+## Row {.tabset .tabset-fade}
+-----------------------------------------
+
+### **Evictions in Austin**
+
+```{r eviction-plot, echo=F}
+evic_monthly <- read_csv('austin_monthly_2020_2021.csv') %>%
+  mutate(Month = parse_date_time(month, "my"),
+         Month = as.Date(Month))
+
+tltip_evictions <- tooltip_table('Eviction Filings: ', sprintf("{point.%s:.0f}", c('Eviction Filings')))
+
+    # Year = year(month),
+    #      Month = month(month),
+    #      Month_Year = ymd(paste0(Year, "-",
+    #                              Month, "-",
+    #                              "01")))
+
+evic_by_month <- evic_monthly %>%   
+  group_by(Month) %>% 
+  summarize("Eviction Filings" = sum(filings_2020)) %>% 
+  arrange(desc(`Eviction Filings`)) %>% 
+  filter(Month <= '2022-07-01')
+
+# write_csv(evic_by_month, 'atx_evictions_by_month.csv')
+
+evic_hchart <- hchart(evic_by_month, type = 'column', hcaes(x = Month, y = `Eviction Filings`)) %>% 
+  hc_tooltip(
+    useHTML = TRUE,
+    headerFormat = "",
+    pointFormat = tltip_evictions
+    )  %>% 
+  hc_credits(
+    enabled = TRUE, text = "Source: Eviction Lab",
+    href = "https://evictionlab.org/eviction-tracking/austin-tx/",
+    style = list(fontSize = "12px")
+  )
+
+# ggplot(evic_by_month) +
+#   geom_col(aes(x = Month, y = filings_2020))
+
+evic_hchart
+
+```
+
+### **Average Rent in Austin**
+
+```{r avg-rent-plot, echo=F}
+atx_rent <- read_csv('austin_rent_2014_2022_sept2022.csv')
+
+rent <- as.data.frame(t(atx_rent[,-1]))
+
+rent <- tibble::rownames_to_column(rent, 'Date') %>% 
+  rename('Average Rent' = V1)
+
+rent$Month <- as.Date(as.yearmon(rent$Date))
+
+tltip_rent <- tooltip_table('Average Rent: ', sprintf("{point.%s:.0f}", c('Average Rent')))
+
+# avg_rent_plot <- ggplot(rent, aes(x = Date, y = `Average Rent`)) +
+#   geom_line(color = '#66c2a5', size = 1) +
+#   scale_x_date(date_labels = '%Y', date_breaks = '1 year') +
+#   scale_y_continuous(labels = scales::dollar_format(),
+#                      limits = c(1000, 2000)) +
+#   labs(title = 'Seasonally Adjusted Average Rent in Austin',
+#        subtitle = 'January 2014 - May 2022',
+#        x = NULL,
+#        y = NULL, 
+#        caption = "Source: Zillow\nSee https://www.zillow.com/research/data/") +
+#   theme_minimal() +
+#   theme(legend.position = "none",
+#         legend.title = element_blank(),
+#         plot.title.position = "plot",
+#         panel.grid.minor = element_blank(),
+#         panel.grid.major.x = element_blank(),
+#         axis.text = element_text(size = 12))
+
+# avg_rent_plot
+
+rent_2020_present <- rent %>% 
+  filter(Month >= '2020-01-01') %>% 
+  select(-Date)
+
+# write_csv(rent_2020_present, 'atx_avg_rent_by_month.csv')
+
+rent_hchart <- hchart(rent_2020_present, type = 'line', hcaes(x = Month, y = `Average Rent`)) %>% 
+  hc_tooltip(
+    useHTML = TRUE,
+    headerFormat = "",
+    pointFormat = tltip_rent
+    )  %>% 
+  hc_caption(
+    text = "The mean of listed rents that fall into the 40th to 60th percentile range for all homes and apartments in a given region. See source for more information."
+  ) %>% 
+  hc_credits(
+    enabled = TRUE, text = "Source: Zillow",
+    href = "https://www.zillow.com/research/data/",
+    style = list(fontSize = "12px")
+  )
+
+# ggplot(evic_by_month) +
+#   geom_col(aes(x = Month, y = filings_2020))
+
+rent_hchart
+
+```
+
+Socioeconomic Factors {.storyboard data-navmenu="Dig Into the Data"}
+=========================================
+
+### Rent Prices {data-commentary-width=225}
+
+```{r rent-plots, echo=F}
+rent_burden_homelessness_scatter <- df_final %>% 
+  ggplot(mapping = aes(x = percent_rent_burdened_2019, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Percent Who Are Rent Burdened",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+rent_increase_homelessness_scatter <- df_final %>% 
+  ggplot(mapping = aes(x = rent_pct_increase, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Percent Increase in Median Gross Rent (2010-2019)",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+just_vulnerability_map <- df_final %>% 
+  ggplot(aes(fill = Vulnerability)) +
+    geom_sf_interactive(
+    aes(
+      tooltip = Name,
+      data_id = GEOID
+    ),
+    size = 0.2, color = "black"
+  ) +
+  theme_void() +
+  theme(legend.position = 'none') +
+  scale_fill_distiller(palette = 'Blues', direction = 1)
+
+patch_rent_plot <- rent_burden_homelessness_scatter + just_vulnerability_map + rent_increase_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see its rent burden percentage and homelessness rate.\nHovering over a dot in one of the scatterplots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+
+rent_burden_model <- lm(data = df_final, people_per_5k ~ percent_rent_burdened_2019)
+
+rate_rent_burden_effect <- round(1 / rent_burden_model$coefficients[2], 0)
+
+rent_burden_q1_q3_effect_diff <- round((summary(df_final$percent_rent_burdened_2019)[5] - summary(df_final$percent_rent_burdened_2019)[2]) * rent_burden_model$coefficients[2], 0)
+
+rent_burden_q1_est <- rent_burden_model$coefficients[1] + (summary(df_final$percent_rent_burdened_2019)[2]*rent_burden_model$coefficients[2])
+
+rent_increase_model <- lm(data = df_final, people_per_5k ~ rent_pct_increase)
+
+rate_rent_increase_effect <- round(1 / rent_increase_model$coefficients[2], 0)
+
+rent_increase_q1_q3_effect_diff <- round((summary(df_final$rent_pct_increase)[5] - summary(df_final$rent_pct_increase)[2]) * rent_increase_model$coefficients[2], 0)
+
+rent_increase_q1_est <- rent_increase_model$coefficients[1] + (summary(df_final$rent_pct_increase)[2]*rent_increase_model$coefficients[2])
+
+girafe(
+  ggobj = patch_rent_plot,
+  width_svg = 9.75,
+  options = list(
+    opts_sizing(rescale = TRUE),
+    opts_zoom(max = 5),
+    opts_tooltip(css = tooltip_css, delay_mouseover = 0, delay_mouseout = 0),
+    opts_hover(css = "fill: #E69F00; fill-opacity: 1.0; stroke: #E69F00;")
+  )
+)
+```
+
+***
+
+The two scatterplots here show the following:
+
+*Rent Burden*
+
+- A **`r rate_rent_burden_effect` percentage point increase** in the number of people in a Tract who are **rent burdened** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- On average, almost **`r rent_burden_q1_q3_effect_diff` more people (per 5,000)** fall into homelessness in the most rent burdened Tracts than they do in the least rent burdened Tracts.
+
+*Median Gross Rent*
+
+- An **`r rate_rent_increase_effect` percent increase** in the **median gross rent** in a Tract is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- On average, almost **`r rent_increase_q1_q3_effect_diff` more people (per 5,000)** fall into homelessness in Tracts with the highest rent increase than they do in ones with the lowest.
+
+<!-- Other Housing Indicators and Homelessness {.storyboard data-navmenu="Factors"} -->
+<!-- ========================================= -->
+
+<!-- Column -->
+<!-- ----------------------------------------- -->
+
+### Evictions and Overcrowded Rentals {data-commentary-width=225}
+
+```{r eviction-plots, echo=F}
+
+df_wo_evic_outliers <- df_final %>% 
+  filter(filing_rate_5yr < 10)
+
+eviction_homelessness_scatter <- df_wo_evic_outliers %>% 
+ggplot(mapping = aes(x = filing_rate_5yr, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Eviction Filing Rate",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+# eviction_homelessness_scatter
+
+overcrowded_homelessness_scatter <- df_final %>% 
+  ggplot(mapping = aes(x = percent_overcrowded_rentals, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Percent Living in Overcrowded Rental Unit",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+overcrowded_model <- lm(data = df_final, people_per_5k ~ percent_overcrowded_rentals)
+
+rate_overcrowded_effect <- round(1 / overcrowded_model$coefficients[2], 0)
+
+overcrowded_q1_q3_effect_diff <- round((summary(df_final$percent_overcrowded_rentals)[5] - summary(df_final$percent_overcrowded_rentals)[2]) * overcrowded_model$coefficients[2], 0)
+
+just_vulnerability_map <- df_final %>% 
+  # filter(filing_rate_5yr < 10) %>% 
+  ggplot(aes(fill = Vulnerability)) +
+    geom_sf_interactive(
+    aes(
+      tooltip = Name,
+      data_id = GEOID
+    ),
+    size = 0.2, color = "black"
+  ) +
+  theme_void() +
+  theme(legend.position = 'none') +
+  scale_fill_distiller(palette = 'Blues', direction = 1)
+
+patch_hsg_plot <- eviction_homelessness_scatter + just_vulnerability_map + overcrowded_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract on the map to see where it stands on the measures in the plots.\nYou can also hover over a dot in one of the plots to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+
+# patch_rent_plot
+
+eviction_model <- lm(data = df_wo_evic_outliers, people_per_5k ~ filing_rate_5yr)
+
+# eviction_model
+
+rate_eviction_effect <- round(eviction_model$coefficients[2], 0)
+
+eviction_q1_q3_effect_diff <- round((summary(df_wo_evic_outliers$filing_rate_5yr)[5] - summary(df_wo_evic_outliers$filing_rate_5yr)[2]) * eviction_model$coefficients[2], 0)
+
+girafe(
+  ggobj = patch_hsg_plot,
+  # height_svg = 6.5,
+  width_svg = 9.75,
+  options = list(
+    opts_sizing(rescale = TRUE),
+    opts_zoom(max = 5),
+    opts_tooltip(css = tooltip_css, delay_mouseover = 0, delay_mouseout = 0),
+    opts_hover(css = "fill: #E69F00; fill-opacity: 1.0; stroke: #E69F00;")
+  )
+)
+```
+
+***
+
+The two plots here show the following:
+
+*Evictions*
+
+- An increase of **`r rate_eviction_effect`** in the historical eviction filing rate in a Tract is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- On average, almost **`r eviction_q1_q3_effect_diff` more people (per 5,000)** fall into homelessness in Tracts with the highest historical eviction rates than they do in Tracts with the least.
+
+*Overcrowded Rental Units* 
+
+- A **`r rate_overcrowded_effect` percentage point increase** in the number of people who live in **overcrowded rental units** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- On average, almost **`r overcrowded_q1_q3_effect_diff` more people (per 5,000)** fall into homelessness in Tracts with the highest number of overcrowded rental units than they do in Tracts with the least.
+
+### Housing Values and Gentrification {data-commentary-width=225}
+
+```{r housing-plots, echo=F}
+hsg_values_homelessness_scatter <- df_final %>%
+  ggplot(mapping = aes(x = value_pct_increase, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Percent Increase in Housing Values (2010-2019)",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+gentrifying_homelessness_scatter <- df_final %>% 
+  filter(!is.na(Gentrifying)) %>%
+  ggplot(mapping = aes(x = as.factor(Gentrifying), y = people_per_5k)) +
+  geom_boxplot(size = .5,
+               outlier.shape = NA) +
+  geom_jitter_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  labs(x = "Gentrifying Tract (2010-2019)",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+hsg_values_model <- lm(data = df_final, people_per_5k ~ value_pct_increase)
+
+rate_hsg_values_effect <- round(1 / hsg_values_model$coefficients[2], 0)
+
+hsg_values_q1_q3_effect_diff <- round((summary(df_final$value_pct_increase)[5] - summary(df_final$value_pct_increase)[2]) * hsg_values_model$coefficients[2], 0)
+
+rates_by_gentrifying <- df_final %>% 
+  st_drop_geometry() %>% 
+  group_by(Gentrifying) %>% 
+  summarize(MedianRate = median(people_per_5k),
+            MeanRate = mean(people_per_5k))
+
+gentrifying_model <- lm(data = df_final, people_per_5k ~ Gentrifying)
+
+rate_gentrifying_effect <- round(gentrifying_model$coefficients[2], 0)
+
+just_vulnerability_map <- df_final %>% 
+  ggplot(aes(fill = Vulnerability)) +
+    geom_sf_interactive(
+    aes(
+      tooltip = Name,
+      data_id = GEOID
+    ),
+    size = 0.2, color = "black"
+  ) +
+  theme_void() +
+  theme(legend.position = 'none') +
+  scale_fill_distiller(palette = 'Blues', direction = 1)
+
+patch_hsg_plot <- hsg_values_homelessness_scatter + just_vulnerability_map + gentrifying_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see its eviction filing rate and its homelessness rate.\nHovering over a dot in one of the plots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+
+girafe(
+  ggobj = patch_hsg_plot,
+  # height_svg = 6.5,
+  width_svg = 9.75,
+  options = list(
+    opts_sizing(rescale = TRUE),
+    opts_zoom(max = 5),
+    opts_tooltip(css = tooltip_css, delay_mouseover = 0, delay_mouseout = 0),
+    opts_hover(css = "fill: #E69F00; fill-opacity: 1.0; stroke: #E69F00;")
+  )
+)
+
+```
+
+***
+
+The two plots here show the following:
+
+*Housing Values*
+
+- A **`r rate_hsg_values_effect` percent increase** in housing values in a Tract is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+
+*Gentrification* 
+
+- On average, approximately **`r rate_gentrifying_effect` more people (per 5,000)** fall into homelessness in **gentrifying Tracts** than they do in Tracts that are not gentrifying.
+
+### Health Access {data-commentary-width=225}
+
+```{r health-plots, echo=F}
+insurance_homelessness_scatter <- df_final %>% 
+  ggplot(mapping = aes(x = percent_uninsured, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Percent Without Health Insurance",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+df_wo_health_services_outliers <- df_final %>% 
+  filter(allhealth_popden < 30)
+
+health_services_homelessness_scatter <- df_wo_health_services_outliers %>%  
+  ggplot(mapping = aes(x = allhealth_popden, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Health Service Facilities Per 1,000 People",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+# mental_health_homelessness_scatter <- tracts_sf_index_orig_data %>% 
+#   # filter(filing_rate_5yr < 10) %>%
+#   ggplot(mapping = aes(x = percent_reporting_bad_mental_health, y = people_per_5k)) +
+#   geom_point_interactive(
+#     aes(tooltip = Name.x,
+#         data_id = GEOID),
+#     na.rm = TRUE, size = 1.25,
+#     color = "#08519c", fill = "#0072B280"
+#   ) + 
+#   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+#   labs(x = "Pct Reporting Bad Mental Health",
+#        y = "Homelessness Rate (Per 5,000 People Per Year)") +
+#   theme_minimal_grid() +
+#   theme(axis.text = element_text(size = 6),
+#         axis.title = element_text(size = 7))
+
+just_vulnerability_map <- df_final %>% 
+  ggplot(aes(fill = Vulnerability)) +
+    geom_sf_interactive(
+    aes(
+      tooltip = Name,
+      data_id = GEOID
+    ),
+    size = 0.2, color = "black"
+  ) +
+  theme_void() +
+  theme(legend.position = 'none') +
+  scale_fill_distiller(palette = 'Blues', direction = 1)
+
+patch_health_plots <- insurance_homelessness_scatter + just_vulnerability_map + health_services_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see its health insurance coverage rate, the percent of people reporting bad mental health, and its homelessness rate.\nHovering over a dot in one of the scatterplots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+
+uninsured_model <- lm(data = df_final, people_per_5k ~ percent_uninsured)
+
+rate_uninsured_effect <- round(1 / uninsured_model$coefficients[2], 0)
+
+uninsured_q1_q3_effect_diff <- round((summary(df_final$percent_uninsured)[5] - summary(df_final$percent_uninsured)[2]) * uninsured_model$coefficients[2], 0)
+
+health_services_model <- lm(data = df_wo_health_services_outliers, people_per_5k ~ allhealth_popden)
+
+rate_health_services_effect <- round(1 / health_services_model$coefficients[2], 0)
+
+health_services_q1_q3_effect_diff <- round((summary(df_final$allhealth_popden)[5] - summary(df_final$allhealth_popden)[2]) * health_services_model$coefficients[2], 0)
+
+# test_patch
+
+# patch_plot
+
+# rent_burden_homelessness_scatter
+
+# eviction_homelessness_scatter
+
+# test_patch_v2
+
+# eviction_map
+
+girafe(
+  ggobj = patch_health_plots,
+  width_svg = 9.75,
+  options = list(
+    opts_sizing(rescale = TRUE),
+    opts_zoom(max = 5),
+    opts_tooltip(css = tooltip_css, delay_mouseover = 0, delay_mouseout = 0),
+    opts_hover(css = "fill: #E69F00; fill-opacity: 1.0; stroke: #E69F00;")
+  )
+)
+```
+
+***
+
+The two scatterplots here show the following:
+
+*Health Insurance*
+
+- A **`r rate_uninsured_effect` percentage point increase** in the number of people in a Tract who do not have **health insurance** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+
+*Health Services*
+
+- A decrease of **`r rate_health_services_effect*-1` health service facilities (per 1,000 people)** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+
+### Poverty and Unemployment Rates  {data-commentary-width=225}
+
+```{r poverty-plots, echo=F}
+
+df_wo_poverty_outliers <- df_final %>% 
+  filter(poverty_rate_2019 < 60)
+
+poverty_homelessness_scatter <- df_wo_poverty_outliers %>% 
+  ggplot(mapping = aes(x = poverty_rate_2019, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Poverty Rate",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+df_wo_unemploy_outliers <- df_final %>% 
+  filter(Percent_Unemployed < 20)
+
+unemployment_homelessness_scatter <- df_wo_unemploy_outliers %>%
+  ggplot(mapping = aes(x = Percent_Unemployed, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Unemployment Rate",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+just_vulnerability_map <- df_final %>% 
+  ggplot(aes(fill = Vulnerability)) +
+    geom_sf_interactive(
+    aes(
+      tooltip = Name,
+      data_id = GEOID
+    ),
+    size = 0.2, color = "black"
+  ) +
+  theme_void() +
+  theme(legend.position = 'none') +
+  scale_fill_distiller(palette = 'Blues', direction = 1)
+
+patch_poverty_plots <- poverty_homelessness_scatter + just_vulnerability_map + unemployment_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see its poverty and unemployment rates and its homelessness rate.\nHovering over a dot in one of the scatterplots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+
+poverty_model <- lm(data = df_wo_poverty_outliers, people_per_5k ~ poverty_rate_2019)
+
+rate_poverty_effect <- round(1 / poverty_model$coefficients[2], 0)
+
+unemployed_model <- lm(data = df_wo_unemploy_outliers, people_per_5k ~ Percent_Unemployed)
+
+rate_unemployed_effect <- round(1 / unemployed_model$coefficients[2], 0)
+
+girafe(
+  ggobj = patch_poverty_plots,
+  width_svg = 9.75,
+  options = list(
+    opts_sizing(rescale = TRUE),
+    opts_zoom(max = 5),
+    opts_tooltip(css = tooltip_css, delay_mouseover = 0, delay_mouseout = 0),
+    opts_hover(css = "fill: #E69F00; fill-opacity: 1.0; stroke: #E69F00;")
+  )
+)
+```
+
+***
+
+The two scatterplots here show the following:
+
+*Poverty*
+
+- A **`r rate_poverty_effect` percentage point increase** in the **poverty rate** in a Tract is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+
+*Unemployment*
+
+- A **`r rate_unemployed_effect` percentage point increase** in the **unemployment rate** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+
+### Race and Ethnicity  {data-commentary-width=225}
+
+```{r race-plots, echo=F}
+black_homelessness_scatter <- df_final %>% 
+  ggplot(mapping = aes(x = percent_nhblack, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Percent Black",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+hispanic_homelessness_scatter <- df_final %>% 
+  ggplot(mapping = aes(x = percent_hispanic, y = people_per_5k)) +
+  geom_point_interactive(
+    aes(tooltip = Name,
+        data_id = GEOID),
+    na.rm = TRUE, size = 1.25,
+    color = "#08519c", fill = "#0072B280"
+  ) + 
+  geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+  labs(x = "Percent Hispanic",
+       y = "Homelessness Rate (Per 5,000 People Per Year)") +
+  theme_minimal_grid() +
+  theme(axis.text = element_text(size = 6),
+        axis.title = element_text(size = 7))
+
+just_vulnerability_map <- df_final %>%
+  # filter(filing_rate_5yr < 10) %>% 
+  ggplot(aes(fill = Vulnerability)) +
+    geom_sf_interactive(
+    aes(
+      tooltip = Name,
+      data_id = GEOID
+    ),
+    size = 0.2, color = "black"
+  ) +
+  theme_void() +
+  theme(legend.position = 'none') +
+  scale_fill_distiller(palette = 'Blues', direction = 1)
+
+patch_race_plots <- black_homelessness_scatter + just_vulnerability_map + hispanic_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see the proportion of people who are non-Hispanic Black, the proportion of people who are Hispanic, and its homelessness rate.\nHovering over a dot in one of the scatterplots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+
+black_model <- lm(data = df_final, people_per_5k ~ percent_nhblack)
+
+rate_black_effect <- round(1 / black_model$coefficients[2], 0)
+
+hispanic_model <- lm(data = df_final, people_per_5k ~ percent_hispanic)
+
+rate_hispanic_effect <- round(1 / hispanic_model$coefficients[2], 0)
+
+girafe(
+  ggobj = patch_race_plots,
+  width_svg = 9.75,
+  options = list(
+    opts_sizing(rescale = TRUE),
+    opts_zoom(max = 5),
+    opts_tooltip(css = tooltip_css, delay_mouseover = 0, delay_mouseout = 0),
+    opts_hover(css = "fill: #E69F00; fill-opacity: 1.0; stroke: #E69F00;")
+  )
+)
+```
+
+***
+
+The two scatterplots here show the following:
+
+- A **`r rate_black_effect` percentage point increase** in the proportion of a Tract's population that is **non-Hispanic Black** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- A **`r rate_hispanic_effect` percentage point increase** in the proportion of a Tract's population that is **Hispanic** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+
+<!-- ### Social Service and Civic Organizations {data-commentary-width=225} -->
+
+```{r social-plots, echo=F}
+# social_homelessness_scatter <- tracts_sf_index_orig_data %>% 
+#   filter(social_service_orgs_per5k < 50) %>% 
+#   ggplot(mapping = aes(x = social_service_orgs_per5k, y = people_per_5k)) +
+#   geom_point_interactive(
+#     aes(tooltip = Name.x,
+#         data_id = GEOID),
+#     na.rm = TRUE, size = 1.25,
+#     color = "#08519c", fill = "#0072B280"
+#   ) + 
+#   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+#   labs(x = "Social Service Orgs Per 5,000 People",
+#        y = "Homelessness Rate (Per 5,000 People Per Year)") +
+#   theme_minimal_grid() +
+#   theme(axis.text = element_text(size = 6),
+#         axis.title = element_text(size = 7))
+# 
+# # social_homelessness_scatter
+# 
+# civic_homelessness_scatter <- tracts_sf_index_orig_data %>% 
+#   filter(civic_orgs_per5k < 25) %>%
+#   ggplot(mapping = aes(x = civic_orgs_per5k, y = people_per_5k)) +
+#   geom_point_interactive(
+#     aes(tooltip = Name.x,
+#         data_id = GEOID),
+#     na.rm = TRUE, size = 1.25,
+#     color = "#08519c", fill = "#0072B280"
+#   ) + 
+#   geom_smooth(method = 'lm', se = F, linetype = 2, size = .5, color = 'black') + 
+#   labs(x = "Civic Orgs Per 5,000 People",
+#        y = "Homelessness Rate (Per 5,000 People Per Year)") +
+#   theme_minimal_grid() +
+#   theme(axis.text = element_text(size = 6),
+#         axis.title = element_text(size = 7))
+# 
+# # civic_homelessness_scatter
+# 
+# just_vulnerability_map <- tracts_sf_index_orig_data %>% 
+#   # filter(filing_rate_5yr < 10) %>% 
+#   ggplot(aes(fill = Vulnerability)) +
+#     geom_sf_interactive(
+#     aes(
+#       tooltip = Name.x,
+#       data_id = GEOID
+#     ),
+#     size = 0.2, color = "black"
+#   ) +
+#   theme_void() +
+#   theme(legend.position = 'none') +
+#   scale_fill_distiller(palette = 'Blues', direction = 1)
+# 
+# # scale_fill_viridis_c() 
+# 
+# # eviction_map
+# 
+# # rent_burden_homelessness_scatter
+# 
+# # scatterplots <- plot_grid(eviction_homelessness_scatter, rent_burden_homelessness_scatter, ncol = 1, align = "v",
+# #                           rel_heights = c(1,1),
+# #   rel_widths = c(1,1))
+# # 
+# # scatterplots
+# 
+# # patch_plot <- ((eviction_homelessness_scatter / rent_burden_homelessness_scatter) | eviction_map)  + plot_layout(widths = c(1,1.2))
+# # 
+# # layout <- c(
+# #   area(1, 1),
+# #   area(2, 2),
+# #   area(1, 3)
+# # )
+# # 
+# # # plot(layout)
+# # 
+# # test_patch <- (eviction_homelessness_scatter + plot_spacer() + rent_burden_homelessness_scatter) / (plot_spacer() + eviction_map + plot_spacer()) + plot_layout(heights = c(.75,1))
+# # 
+# # test_patch_v2 <- eviction_homelessness_scatter + eviction_map + rent_burden_homelessness_scatter + plot_layout(design = layout)
+# 
+# patch_social_plots <- social_homelessness_scatter + just_vulnerability_map + civic_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see the number of civic and social service organizations and its homelessness rate.\nHovering over a dot in one of the scatterplots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+# 
+# # patch_rent_plot
+# 
+# social_service_model <- lm(data = tracts_sf_index_orig_data, people_per_5k ~ social_service_orgs_per5k)
+# 
+# rate_social_service_effect <- round(1 / social_service_model$coefficients[2], 0)
+# 
+# civic_model <- lm(data = tracts_sf_index_orig_data, people_per_5k ~ civic_orgs_per1k)
+# 
+# rate_civic_effect <- round(1 / civic_model$coefficients[2], 0)
+# 
+# # test_patch
+# 
+# # patch_plot
+# 
+# # rent_burden_homelessness_scatter
+# 
+# # eviction_homelessness_scatter
+# 
+# # test_patch_v2
+# 
+# # eviction_map
+# 
+# girafe(
+#   ggobj = patch_social_plots,
+#   width_svg = 9.75,
+#   options = list(
+#     opts_sizing(rescale = TRUE),
+#     opts_zoom(max = 5),
+#     opts_tooltip(css = tooltip_css, delay_mouseover = 0, delay_mouseout = 0),
+#     opts_hover(css = "fill: #E69F00; fill-opacity: 1.0; stroke: #E69F00;")
+#   )
+# )
+
+# ***
+# 
+# The two scatterplots here show the following:
+# 
+# - An increase of **`r round(abs(rate_social_service_effect/10))`** social service organizations (per 5,000 people) is correlated with an approximate **decrease of 1 person (per 50,000)** falling into homelessness.
+# - A **`r rate_civic_effect`% increase** in the proportion of a Tract's population that is **Hispanic** is correlated with an approximate **increase of 1 person (per 5,000)** falling into homelessness.
+```
+
+Table {data-navmenu="About the Data"}
+=========================================
+
+Column
+-----------------------------------------
+
+```{r reactable-table, echo=F}
+
+sticky_style <- list(backgroundColor = "#f7f7f7")
+
+condensed_df <- df_final %>% 
+  st_drop_geometry() %>% 
+  mutate(percent_overcrowded_rentals = round(percent_overcrowded_rentals, 1),
+         filing_rate_5yr = round(filing_rate_5yr, 1),
+         Percent_Unemployed = round(Percent_Unemployed, 1),
+         percent_nhblack = round(percent_nhblack, 1),
+         percent_hispanic = round(percent_hispanic, 1)) %>% 
+  select(Name, total_pop, percent_rent_burdened_2019, percent_overcrowded_rentals, filing_rate_5yr, Gentrifying, percent_uninsured, allhealth_popden, poverty_rate_2019, Percent_Unemployed, percent_nhblack, percent_hispanic)
+
+reactable(
+  condensed_df,
+  columns = list(
+    Name = colDef(
+      name = 'Census Tract',
+      sticky = "left",
+      style = sticky_style,
+      headerStyle = sticky_style,
+      maxWidth = 120),
+    total_pop = colDef(name = "Population",
+                             maxWidth = 120),
+    percent_rent_burdened_2019 = colDef(name = "Pct Rent Burden",
+                             maxWidth = 120),
+    percent_overcrowded_rentals = colDef(name = "Pct Overcrowded Rentals",
+                             maxWidth = 120),
+    percent_uninsured = colDef(name = "Pct Without Health Insurance",
+                             maxWidth = 120),
+    allhealth_popden = colDef(name = "Health Facilities (Per 1,000 People)",
+                             maxWidth = 120),
+    filing_rate_5yr = colDef(name = "Eviction Filing Rate",
+                             maxWidth = 120),
+    Gentrifying = colDef(name = "Gentrifying",
+                               maxWidth = 120),
+    poverty_rate_2019 = colDef(name = "Poverty Rate",
+                             maxWidth = 120),
+    Percent_Unemployed = colDef(name = "Unemployment Rate",
+                               maxWidth = 120),
+    percent_nhblack = colDef(name = "Pct Black",
+                             maxWidth = 120),
+    percent_hispanic = colDef(name = "Percent Hispanic",
+                               maxWidth = 120)),
+  ### add column group header
+  columnGroups = list(
+    colGroup(name = "Rent Factors", columns = c("percent_rent_burdened_2019", "percent_overcrowded_rentals")),
+    colGroup(name = "Housing Factors", columns = c("filing_rate_5yr","Gentrifying")),
+    colGroup(name = "Health Factors", columns = c("percent_uninsured","allhealth_popden")),
+    colGroup(name = "Poverty and Unemployment", columns = c("poverty_rate_2019","Percent_Unemployed")),
+    colGroup(name = "Race and Ethnicity", columns = c("percent_nhblack","percent_hispanic"))),
+  showSortIcon = TRUE,
+  searchable = TRUE,
+  filterable = TRUE,
+  resizable = TRUE,
+  highlight = TRUE,
+  language = reactableLang(
+    searchPlaceholder = "Search Census Tract"),
+  defaultPageSize = 30)
+
+```
+
+About the Data and Index {data-navmenu="About the Data"}
+=========================================
+
+Column
+-----------------------------------------
+
+**About the index:**
+
+Coming soon!
+
+Column
+-----------------------------------------
+
+**Data sources:**
+
+Coming soon!
+
+<style>
+
+.storyboard-nav .sbframelist {
+    margin: 0 auto;
+    width: 95%;
+    height: 40px;
+    overflow: hidden;
+    text-shadow: none;
+    margin-bottom: 8px;
+}
+
+.storyboard-nav .sbnext, .storyboard-nav .sbprev {
+    float: left;
+    width: 2%;
+    height: 40px;
+    font-size: 30px;
+}
+
+</style>
