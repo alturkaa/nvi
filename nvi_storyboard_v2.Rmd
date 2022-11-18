@@ -158,7 +158,7 @@ dfs_for_fa_no_missing <- dfs_for_fa %>%
 
 fa_test_updated <- factanal(dfs_for_fa_no_missing, factors = 4, rotation = 'none')
 
-fa_test_updated
+# fa_test_updated
  
 loadings_df <- as.data.frame(unclass(fa_test_updated$loadings))
 
@@ -228,8 +228,21 @@ tracts_map <- tracts_sf_index_orig_data %>%
 df_final <- tracts_sf_index_orig_data %>% 
   mutate(AtRisk = ifelse(atrisk_gentrifying_dummy == 1, 'Yes', 'No'),
          Gentrifying = ifelse(gentrifying_using_educ_and_rent_or_hsg_value == 1, 'Yes', 'No'),
-         rent_pct_increase = rent_pct_increase * 100,
-         value_pct_increase = value_pct_increase * 100)
+         rent_pct_increase = round(rent_pct_increase * 100, 1),
+         value_pct_increase = round(value_pct_increase * 100, 1),
+         percent_uninsured = round(percent_uninsured, 1),
+         percent_rent_burdened_2019 = round(percent_rent_burdened_2019, 1),
+         poverty_rate_2019 = round(poverty_rate_2019, 1),
+         filing_rate_5yr = round(filing_rate_5yr, 1),
+         allhealth_popden = round(allhealth_popden, 1),
+         Vulnerability_qual = case_when(Vulnerability == 1 ~ 'Very Low',
+                                   Vulnerability == 2 ~ 'Low',
+                                   Vulnerability == 3 ~ 'Medium',
+                                   Vulnerability == 4 ~ 'High',
+                                   Vulnerability == 5 ~ 'Very High',
+                                   is.na(Vulnerability) ~ NA_character_))
+
+df_final$Vulnerability_qual <- factor(df_final$Vulnerability_qual, levels = c("Very Low", "Low", "Medium", 'High', 'Very High'))
 
 # mod1 <- lm(data = tracts_sf_index_orig_data, people_per_capita ~ rent_burden)
 # 
@@ -329,15 +342,16 @@ Column {data-width=625}
 #          opts_hover(css = "stroke-width:2;")
 #        ))
 
-pal <- colorFactor(palette = "Blues", domain = tracts_sf_index_orig_data$Vulnerability)
+pal_vul <- colorFactor(palette = "Blues", domain = df_final$Vulnerability_qual)
 
-area_popup <- paste0("<b>Census Tract:</b> ", tracts_sf_index_orig_data$Name,
-                     "<br><b>Vulnerability:</b> ", tracts_sf_index_orig_data$Vulnerability,
-                     "<br><b>Pct Rent Burdened:</b> ", tracts_sf_index_orig_data$percent_rent_burdened_2019,
-                     "<br><b>Gentrifying?:</b> ", tracts_sf_index_orig_data$gentrifying_using_educ_and_rent_or_hsg_value,
-                     "<br><b>Eviction Rate:</b> ", tracts_sf_index_orig_data$filing_rate_5yr,
-                    '<br><b>Pct Uninsured:</b> ', tracts_sf_index_orig_data$percent_uninsured,
-                    '<br><b>Poverty Rate:</b> ', tracts_sf_index_orig_data$poverty_rate_2019) %>%
+area_popup <- paste0("<b>Census Tract:</b> ", df_final$Name,
+                     "<br><b>Vulnerability:</b> ", df_final$Vulnerability_qual,
+                     "<br><b>Pct Rent Burdened:</b> ", df_final$percent_rent_burdened_2019,
+                     "<br><b>Pct Increase in Rent:</b> ", df_final$rent_pct_increase,
+                     "<br><b>Gentrifying?:</b> ", df_final$Gentrifying,
+                     "<br><b>Eviction Rate:</b> ", df_final$filing_rate_5yr,
+                    '<br><b>Pct Without Health Insurance:</b> ', df_final$percent_uninsured,
+                    '<br><b>Poverty Rate:</b> ', df_final$poverty_rate_2019) %>%
   lapply(htmltools::HTML)
 
 leaflet(df_final) %>%
@@ -345,7 +359,7 @@ leaflet(df_final) %>%
   addProviderTiles(providers$CartoDB.Positron, group = "CartoDB") %>%
   addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
   addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
-  addPolygons(fillColor = ~pal(Vulnerability),
+  addPolygons(fillColor = ~pal_vul(Vulnerability_qual),
               fillOpacity = .9,
               color = "black",
               weight = .5,
@@ -370,10 +384,10 @@ leaflet(df_final) %>%
               group = "Austin Council District",
               highlight = highlightOptions(color = "red",
                                            weight = .5)) %>% 
-  addLegend(data = tracts_sf_index_orig_data,
+  addLegend(data = df_final,
             position = "bottomright",
-            pal = pal,
-            values = ~Vulnerability,
+            pal = pal_vul,
+            values = ~Vulnerability_qual,
             title = "Homelessness Vulnerability",
             group = "Homelessness Vulnerability") %>%
   # Layers control
@@ -385,7 +399,7 @@ leaflet(df_final) %>%
   hideGroup("Austin Council District")
 ```
 
-Recent Rent and Eviction Data {data-navmenu="Overview"}
+Recent Data {data-navmenu="Rent and Eviction"}
 =========================================
 
 ## Row {.tabset .tabset-fade}
@@ -394,7 +408,7 @@ Recent Rent and Eviction Data {data-navmenu="Overview"}
 ### **Evictions in Austin**
 
 ```{r eviction-plot, echo=F}
-evic_monthly <- read_csv('austin_monthly_2020_2021.csv') %>%
+evic_monthly <- read_csv('austin_monthly_2020_2021_nov2022.csv') %>%
   mutate(Month = parse_date_time(month, "my"),
          Month = as.Date(Month))
 
@@ -410,7 +424,7 @@ evic_by_month <- evic_monthly %>%
   group_by(Month) %>% 
   summarize("Eviction Filings" = sum(filings_2020)) %>% 
   arrange(desc(`Eviction Filings`)) %>% 
-  filter(Month <= '2022-07-01')
+  filter(Month <= '2022-10-01')
 
 # write_csv(evic_by_month, 'atx_evictions_by_month.csv')
 
@@ -436,14 +450,15 @@ evic_hchart
 ### **Average Rent in Austin**
 
 ```{r avg-rent-plot, echo=F}
-atx_rent <- read_csv('austin_rent_2014_2022_sept2022.csv')
+atx_rent <- read_csv('austin_rent_2014_2022_nov2022.csv')
 
 rent <- as.data.frame(t(atx_rent[,-1]))
 
 rent <- tibble::rownames_to_column(rent, 'Date') %>% 
-  rename('Average Rent' = V1)
+  rename('Average Rent' = V1) %>% 
+  mutate(Month = as.Date(as.yearmon(Date)))
 
-rent$Month <- as.Date(as.yearmon(rent$Date))
+# rent$Month <- as.Date(as.yearmon(rent$Date))
 
 tltip_rent <- tooltip_table('Average Rent: ', sprintf("{point.%s:.0f}", c('Average Rent')))
 
@@ -495,7 +510,7 @@ rent_hchart
 
 ```
 
-Socioeconomic Factors {.storyboard data-navmenu="Dig Into the Data"}
+Socioeconomic Factors {.storyboard data-navmenu="Correlates of Homelessness"}
 =========================================
 
 ### Rent Prices {data-commentary-width=225}
@@ -544,7 +559,7 @@ just_vulnerability_map <- df_final %>%
   theme(legend.position = 'none') +
   scale_fill_distiller(palette = 'Blues', direction = 1)
 
-patch_rent_plot <- rent_burden_homelessness_scatter + just_vulnerability_map + rent_increase_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see its rent burden percentage and homelessness rate.\nHovering over a dot in one of the scatterplots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+patch_rent_plot <- rent_burden_homelessness_scatter + just_vulnerability_map + rent_increase_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract on the map to see where it stands on the measures in the plots.\nYou can also hover over a dot in one of the plots to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
 
 rent_burden_model <- lm(data = df_final, people_per_5k ~ percent_rent_burdened_2019)
 
@@ -580,13 +595,13 @@ The two scatterplots here show the following:
 
 *Rent Burden*
 
-- A **`r rate_rent_burden_effect` percentage point increase** in the number of people in a Tract who are **rent burdened** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
-- On average, almost **`r rent_burden_q1_q3_effect_diff` more people (per 5,000)** fall into homelessness in the most rent burdened Tracts than they do in the least rent burdened Tracts.
+- A **`r rate_rent_burden_effect` percentage point increase** in the number of people in a Tract who are **rent burdened** is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
+- On average, almost **`r rent_burden_q1_q3_effect_diff` more people (per 5,000)** become homeless in the most rent burdened Tracts than in the least rent burdened ones.
 
 *Median Gross Rent*
 
-- An **`r rate_rent_increase_effect` percent increase** in the **median gross rent** in a Tract is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
-- On average, almost **`r rent_increase_q1_q3_effect_diff` more people (per 5,000)** fall into homelessness in Tracts with the highest rent increase than they do in ones with the lowest.
+- An **`r rate_rent_increase_effect` percent increase** in the **median gross rent** in a Tract is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
+- On average, almost **`r rent_increase_q1_q3_effect_diff` more people (per 5,000)** become homeless in Tracts with the highest rent increase than in ones with the lowest.
 
 <!-- Other Housing Indicators and Homelessness {.storyboard data-navmenu="Factors"} -->
 <!-- ========================================= -->
@@ -653,7 +668,7 @@ just_vulnerability_map <- df_final %>%
   theme(legend.position = 'none') +
   scale_fill_distiller(palette = 'Blues', direction = 1)
 
-patch_hsg_plot <- eviction_homelessness_scatter + just_vulnerability_map + overcrowded_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract on the map to see where it stands on the measures in the plots.\nYou can also hover over a dot in one of the plots to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+patch_hsg_plot <- eviction_homelessness_scatter + just_vulnerability_map + overcrowded_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract on the map to see where it stands on the measures in the plots.\nYou can also hover over a dot in one of the plots to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.\nFour outliers (on eviction rates) excluded.", theme = theme(plot.caption = element_text(size = 6)))
 
 # patch_rent_plot
 
@@ -684,13 +699,13 @@ The two plots here show the following:
 
 *Evictions*
 
-- An increase of **`r rate_eviction_effect`** in the historical eviction filing rate in a Tract is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
-- On average, almost **`r eviction_q1_q3_effect_diff` more people (per 5,000)** fall into homelessness in Tracts with the highest historical eviction rates than they do in Tracts with the least.
+- An increase of **`r rate_eviction_effect`** in the historical eviction filing rate in a Tract is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
+- On average, almost **`r eviction_q1_q3_effect_diff` more people (per 5,000)** become homeless in Tracts with the highest historical eviction rates than in Tracts with the lowest.
 
 *Overcrowded Rental Units* 
 
-- A **`r rate_overcrowded_effect` percentage point increase** in the number of people who live in **overcrowded rental units** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
-- On average, almost **`r overcrowded_q1_q3_effect_diff` more people (per 5,000)** fall into homelessness in Tracts with the highest number of overcrowded rental units than they do in Tracts with the least.
+- A **`r rate_overcrowded_effect` percentage point increase** in the number of people who live in **overcrowded rental units** is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
+- On average, almost **`r overcrowded_q1_q3_effect_diff` more people (per 5,000)** become homeless in Tracts with the highest number of overcrowded rental units than in Tracts with the lowest.
 
 ### Housing Values and Gentrification {data-commentary-width=225}
 
@@ -756,7 +771,7 @@ just_vulnerability_map <- df_final %>%
   theme(legend.position = 'none') +
   scale_fill_distiller(palette = 'Blues', direction = 1)
 
-patch_hsg_plot <- hsg_values_homelessness_scatter + just_vulnerability_map + gentrifying_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see its eviction filing rate and its homelessness rate.\nHovering over a dot in one of the plots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+patch_hsg_plot <- hsg_values_homelessness_scatter + just_vulnerability_map + gentrifying_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract on the map to see where it stands on the measures in the plots.\nYou can also hover over a dot in one of the plots to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
 
 girafe(
   ggobj = patch_hsg_plot,
@@ -780,9 +795,11 @@ The two plots here show the following:
 
 - A **`r rate_hsg_values_effect` percent increase** in housing values in a Tract is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
 
+- On average, almost **`r hsg_values_q1_q3_effect_diff` more people (per 5,000)** become homeless in Tracts with the highest housing value increase than in ones with the lowest.
+
 *Gentrification* 
 
-- On average, approximately **`r rate_gentrifying_effect` more people (per 5,000)** fall into homelessness in **gentrifying Tracts** than they do in Tracts that are not gentrifying.
+- On average, approximately **`r rate_gentrifying_effect` more people (per 5,000)** become homeless in **gentrifying Tracts** than they do in Tracts that are not gentrifying.
 
 ### Health Access {data-commentary-width=225}
 
@@ -849,7 +866,7 @@ just_vulnerability_map <- df_final %>%
   theme(legend.position = 'none') +
   scale_fill_distiller(palette = 'Blues', direction = 1)
 
-patch_health_plots <- insurance_homelessness_scatter + just_vulnerability_map + health_services_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see its health insurance coverage rate, the percent of people reporting bad mental health, and its homelessness rate.\nHovering over a dot in one of the scatterplots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+patch_health_plots <- insurance_homelessness_scatter + just_vulnerability_map + health_services_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract on the map to see where it stands on the measures in the plots.\nYou can also hover over a dot in one of the plots to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.\nSeven outliers (on the number of health services per capita) excluded.", theme = theme(plot.caption = element_text(size = 6)))
 
 uninsured_model <- lm(data = df_final, people_per_5k ~ percent_uninsured)
 
@@ -861,7 +878,7 @@ health_services_model <- lm(data = df_wo_health_services_outliers, people_per_5k
 
 rate_health_services_effect <- round(1 / health_services_model$coefficients[2], 0)
 
-health_services_q1_q3_effect_diff <- round((summary(df_final$allhealth_popden)[5] - summary(df_final$allhealth_popden)[2]) * health_services_model$coefficients[2], 0)
+health_services_q1_q3_effect_diff <- round((summary(df_wo_health_services_outliers$allhealth_popden)[5] - summary(df_wo_health_services_outliers$allhealth_popden)[2]) * health_services_model$coefficients[2], 0)
 
 # test_patch
 
@@ -893,11 +910,13 @@ The two scatterplots here show the following:
 
 *Health Insurance*
 
-- A **`r rate_uninsured_effect` percentage point increase** in the number of people in a Tract who do not have **health insurance** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- A **`r rate_uninsured_effect` percentage point increase** in the number of people in a Tract who do not have **health insurance** is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
+
+- On average, almost **`r uninsured_q1_q3_effect_diff` more people (per 5,000)** become homeless in Tracts with the lowest insured rates than in ones with the highest.
 
 *Health Services*
 
-- A decrease of **`r rate_health_services_effect*-1` health service facilities (per 1,000 people)** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- A decrease of **`r rate_health_services_effect*-1` health service facilities (per 1,000 people)** is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
 
 ### Poverty and Unemployment Rates  {data-commentary-width=225}
 
@@ -952,7 +971,7 @@ just_vulnerability_map <- df_final %>%
   theme(legend.position = 'none') +
   scale_fill_distiller(palette = 'Blues', direction = 1)
 
-patch_poverty_plots <- poverty_homelessness_scatter + just_vulnerability_map + unemployment_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract to see its poverty and unemployment rates and its homelessness rate.\nHovering over a dot in one of the scatterplots allows you to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.", theme = theme(plot.caption = element_text(size = 6)))
+patch_poverty_plots <- poverty_homelessness_scatter + just_vulnerability_map + unemployment_homelessness_scatter + plot_annotation(caption = "Hover over a Census tract on the map to see where it stands on the measures in the plots.\nYou can also hover over a dot in one of the plots to see the location of that Census tract.\nClicking on the magnifying glass allows you to zoom into the map and plots.\nSix outliers (on the poverty rate) and one outlier (on the unemployment rate) excluded.", theme = theme(plot.caption = element_text(size = 6)))
 
 poverty_model <- lm(data = df_wo_poverty_outliers, people_per_5k ~ poverty_rate_2019)
 
@@ -980,11 +999,11 @@ The two scatterplots here show the following:
 
 *Poverty*
 
-- A **`r rate_poverty_effect` percentage point increase** in the **poverty rate** in a Tract is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- A **`r rate_poverty_effect` percentage point increase** in the **poverty rate** in a Tract is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
 
 *Unemployment*
 
-- A **`r rate_unemployed_effect` percentage point increase** in the **unemployment rate** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- A **`r rate_unemployed_effect` percentage point increase** in the **unemployment rate** is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
 
 ### Race and Ethnicity  {data-commentary-width=225}
 
@@ -1059,8 +1078,8 @@ girafe(
 
 The two scatterplots here show the following:
 
-- A **`r rate_black_effect` percentage point increase** in the proportion of a Tract's population that is **non-Hispanic Black** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
-- A **`r rate_hispanic_effect` percentage point increase** in the proportion of a Tract's population that is **Hispanic** is correlated with an **increase of 1 person (per 5,000)** falling into homelessness.
+- A **`r rate_black_effect` percentage point increase** in the proportion of a Tract's population that is **non-Hispanic Black** is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
+- A **`r rate_hispanic_effect` percentage point increase** in the proportion of a Tract's population that is **Hispanic** is correlated with an **increase of 1 person (per 5,000)** becoming homeless.
 
 <!-- ### Social Service and Civic Organizations {data-commentary-width=225} -->
 
@@ -1184,7 +1203,7 @@ The two scatterplots here show the following:
 # - A **`r rate_civic_effect`% increase** in the proportion of a Tract's population that is **Hispanic** is correlated with an approximate **increase of 1 person (per 5,000)** falling into homelessness.
 ```
 
-Table {data-navmenu="About the Data"}
+Table {data-navmenu="Dig Into the Data"}
 =========================================
 
 Column
@@ -1201,7 +1220,7 @@ condensed_df <- df_final %>%
          Percent_Unemployed = round(Percent_Unemployed, 1),
          percent_nhblack = round(percent_nhblack, 1),
          percent_hispanic = round(percent_hispanic, 1)) %>% 
-  select(Name, total_pop, percent_rent_burdened_2019, percent_overcrowded_rentals, filing_rate_5yr, Gentrifying, percent_uninsured, allhealth_popden, poverty_rate_2019, Percent_Unemployed, percent_nhblack, percent_hispanic)
+  select(Name, total_pop, rent_pct_increase, value_pct_increase, percent_rent_burdened_2019, percent_overcrowded_rentals, filing_rate_5yr, Gentrifying, percent_uninsured, allhealth_popden, poverty_rate_2019, Percent_Unemployed, percent_nhblack, percent_hispanic)
 
 reactable(
   condensed_df,
@@ -1211,33 +1230,37 @@ reactable(
       sticky = "left",
       style = sticky_style,
       headerStyle = sticky_style,
-      maxWidth = 120),
+      maxWidth = 110),
     total_pop = colDef(name = "Population",
-                             maxWidth = 120),
+                             maxWidth = 110),
     percent_rent_burdened_2019 = colDef(name = "Pct Rent Burden",
-                             maxWidth = 120),
+                             maxWidth = 110),
+    rent_pct_increase = colDef(name = "Pct Increase in Median Rent",
+                               maxWidth = 110),
     percent_overcrowded_rentals = colDef(name = "Pct Overcrowded Rentals",
-                             maxWidth = 120),
+                             maxWidth = 110),
     percent_uninsured = colDef(name = "Pct Without Health Insurance",
-                             maxWidth = 120),
+                             maxWidth = 110),
     allhealth_popden = colDef(name = "Health Facilities (Per 1,000 People)",
-                             maxWidth = 120),
+                             maxWidth = 110),
     filing_rate_5yr = colDef(name = "Eviction Filing Rate",
-                             maxWidth = 120),
+                             maxWidth = 110),
     Gentrifying = colDef(name = "Gentrifying",
-                               maxWidth = 120),
+                               maxWidth = 110),
+    value_pct_increase = colDef(name = "Pct Increase in Housing Values",
+                                maxWidth = 110),
     poverty_rate_2019 = colDef(name = "Poverty Rate",
-                             maxWidth = 120),
+                             maxWidth = 110),
     Percent_Unemployed = colDef(name = "Unemployment Rate",
-                               maxWidth = 120),
+                               maxWidth = 110),
     percent_nhblack = colDef(name = "Pct Black",
-                             maxWidth = 120),
+                             maxWidth = 110),
     percent_hispanic = colDef(name = "Percent Hispanic",
-                               maxWidth = 120)),
+                               maxWidth = 110)),
   ### add column group header
   columnGroups = list(
-    colGroup(name = "Rent Factors", columns = c("percent_rent_burdened_2019", "percent_overcrowded_rentals")),
-    colGroup(name = "Housing Factors", columns = c("filing_rate_5yr","Gentrifying")),
+    colGroup(name = "Rent Factors", columns = c("rent_pct_increase", "percent_rent_burdened_2019", "percent_overcrowded_rentals")),
+    colGroup(name = "Housing Factors", columns = c("value_pct_increase", "filing_rate_5yr","Gentrifying")),
     colGroup(name = "Health Factors", columns = c("percent_uninsured","allhealth_popden")),
     colGroup(name = "Poverty and Unemployment", columns = c("poverty_rate_2019","Percent_Unemployed")),
     colGroup(name = "Race and Ethnicity", columns = c("percent_nhblack","percent_hispanic"))),
@@ -1248,26 +1271,41 @@ reactable(
   highlight = TRUE,
   language = reactableLang(
     searchPlaceholder = "Search Census Tract"),
-  defaultPageSize = 30)
+  defaultPageSize = 20)
 
 ```
 
-About the Data and Index {data-navmenu="About the Data"}
+About the Data {data-navmenu="About the Data"}
 =========================================
 
 Column
 -----------------------------------------
 
-**About the index:**
+**Census Data:**
 
-Coming soon!
+The following data elements were calculated using the U.S. Census Bureau's American Community Survey's (ACS) 2019 5-year estimates:
+
+- **Rent Burden:** Percent of renters who spend more than 30 percent of their income on rent.
+- **Rent Increase:** Percent increase in median gross rent from the 2010 5-year estimates to the 2019 5-year estimates.
+- **Overcrowded Rentals:** Percent of rental units that have more than 1.5 occupants per room.
+- **Housing Value Increase:** Percent increase in the median housing value from the 2010 5-year estimates to the 2019 5-year estimates.
+- **Gentrifying:** A gentrifying tract is one that satisfies three conditions: (1) in 2010, it must have been *at risk* of gentrifying, meaning that a) it had an older housing stock than the county average, and b) the median income of its residents was less than the county median income; (2) the increase, between 2010 and 2019, in the percentage of residents with a bachelor's degree or higher is greater than the average increase across the county; and (3) either median housing values or median rent increased more, between 2010 and 2019, than they did across the county.
+- **Health Insurance:** The percent of people, whether in the labor force or not, without health insurance.
+- **Poverty Rate:** The percent of people living under the poverty line.
+- **Unemployment Rate:** The percent of people in the labor force that are unemployed.
 
 Column
 -----------------------------------------
 
-**Data sources:**
+**Other Data Sources:**
 
-Coming soon!
+- **Eviction Filing Rate:** The filing rate is the number of evictions filed for every 100 renter-occupied homes in a Tract. The data presented here is the five-year average of that filing rate from 2012 to 2016 (accessed in August 2020). For more information on how eviction filings are counted, see the [Eviction Lab](https://evictionlab.org/). 
+- **Homelessness Rate:** The number of people falling into homelessness was calculated using a question on the Coordinated Assessment (the housing intake tool of the Austin/Travis County Homelessness Response System) that asks people what zip code in Austin they were last permanently housed in. Using population estimates, we then calculated that number, on a yearly basis, at the Tract level. The Homelessness Rate is that number per 5,000 people.
+- **Health Facilities:** This number comes from NaNDA, which estimates neighborhood-level indicators using Census Bureau data. The number presented here is the number of hospitals, health clinics, and doctor's offices per 1,000 people in 2017, the latest year the data are available.
+
+**About the Vulnerability Index:**
+
+The Vulnerability Index Map on the landing page is our attempt at measuring and visualizing, at the neighborhood (i.e., Tract) level in Austin, how vulnerable people are to becoming homeless. We use the data we've outlined here and shown throughout the site to create that index. We do so by scaling all the variables and using a method called factor analysis, which allows us to estimate how much each variable is contributing to socioeconomic disadvantage, or, put differently, vulnerability to homelessness. Using each variable's "score," we construct a five-point scale. We excluded Tracts that approximately map onto UT-Austin's campus, since many housing indicators (including rent burden and high rent costs) are likely more reflective of living on a college campus rather than being at risk of becoming homeless. 
 
 <style>
 
