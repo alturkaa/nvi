@@ -1301,7 +1301,7 @@ Column
 
 - **Eviction Filing Rate:** The filing rate is the number of evictions filed for every 100 renter-occupied homes in a Tract. The data presented here is the five-year average of that filing rate from 2012 to 2016 (accessed in August 2020). For more information on how eviction filings are counted, see the [Eviction Lab](https://evictionlab.org/). 
 - **Homelessness Rate:** The number of people falling into homelessness was calculated using a question on the Coordinated Assessment (the housing intake tool of the Austin/Travis County Homelessness Response System) that asks people what zip code in Austin they were last permanently housed in. Using population estimates, we then calculated that number, on a yearly basis, at the Tract level. The Homelessness Rate is that number per 5,000 people.
-- **Health Facilities:** This number comes from NaNDA, which estimates neighborhood-level indicators using Census Bureau data. The number presented here is the number of hospitals, health clinics, and doctor's offices per 1,000 people in 2017, the latest year the data are available.
+- **Health Facilities:** This number comes from the [National Neighborhood Data Archive](https://www.icpsr.umich.edu/web/ICPSR/series/1920), which estimates neighborhood-level indicators using the Census Bureau and other data sources. The number presented here is the number of hospitals, health clinics, and doctor's offices (from the National Establishment Time Series database) per 1,000 people in 2017, the latest year the data are available.
 
 **About the Vulnerability Index:**
 
